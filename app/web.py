@@ -212,8 +212,12 @@ def shop_save(request: Request, shop_id: int,
             (prompt, prompt_analysis, prompt_meta, prompt_image,
              description_mode if description_mode in ("single", "chain") else "single",
              base_url.rstrip("/"), json.dumps(params), vat,
-             int(id_tax_rules_group) if id_tax_rules_group.strip().isdigit() else 1,
-             int(id_size_feature) if id_size_feature.strip().isdigit() else None,
+             # puste pole ZACHOWUJE dotychczasowa wartosc (nie kasuje jej do domyslnej) -
+             # inaczej zapis dowolnego innego ustawienia gubil ID reguly podatkowej
+             (int(id_tax_rules_group) if id_tax_rules_group.strip().isdigit()
+              else shop["id_tax_rules_group"]),
+             (int(id_size_feature) if id_size_feature.strip().isdigit()
+              else shop.get("id_size_feature")),
              create_inactive == "1",
              shop_id),
         )

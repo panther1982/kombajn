@@ -76,24 +76,70 @@
     </table>
   </div>
 
-  {% if r.suggested_tax_group or r.suggested_size_feature %}
   <div class="card">
     <h2>Wykryte ustawienia</h2>
     <p style="font-size:13px;color:var(--ink-2);margin:0 0 12px">
       Odczytane bezpośrednio ze sklepu. Numery bywają różne w każdej instalacji,
       więc warto użyć wykrytych zamiast przepisywać ręcznie.
     </p>
+    {% if not r.suggested_tax_group %}
+      <div class="shop-item">
+        <div>Reguła podatkowa
+          <div style="font-size:12px;color:var(--ink-3)">
+            {% if not r.tax_readable %}
+              Nie udało się odczytać reguł ze sklepu — klucz nie ma uprawnienia
+              <code>tax_rule_groups: View</code>. Włącz je i sprawdź ponownie,
+              albo wpisz ID ręcznie w ustawieniach.
+            {% else %}
+              Nie znaleziono reguły z „23” w nazwie. Wpisz ID ręcznie w ustawieniach
+              (Międzynarodowe → Podatki → Reguły podatkowe).
+            {% endif %}
+          </div>
+        </div>
+        <span class="pill" style="background:var(--danger-bg);color:var(--danger)">brak</span>
+      </div>
+    {% endif %}
+    {% if not r.suggested_size_feature %}
+      <div class="shop-item">
+        <div>Cecha „Rozmiar”
+          <div style="font-size:12px;color:var(--ink-3)">
+            {% if not r.features_readable %}
+              Nie udało się odczytać cech — brak uprawnienia <code>product_features: View</code>.
+            {% else %}
+              W sklepie nie ma cechy o nazwie „Rozmiar”. Załóż ją w panelu
+              (Katalog → Atrybuty i cechy → Cechy) i sprawdź ponownie.
+            {% endif %}
+          </div>
+        </div>
+        <span class="pill" style="background:var(--danger-bg);color:var(--danger)">brak</span>
+      </div>
+    {% endif %}
+
     <form method="post" action="/shop/{{ shop.id }}/zastosuj-wykryte">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       {% if r.suggested_tax_group %}
-        <input type="hidden" name="id_tax_rules_group" value="{{ r.suggested_tax_group }}">
         <div class="shop-item">
-          <div>Reguła podatkowa 23%
-            <div style="font-size:12px;color:var(--ink-3)">
-              {% for gid, nm in r.tax_groups %}{% if gid == r.suggested_tax_group %}{{ nm }}{% endif %}{% endfor %}
-            </div>
+          <div style="min-width:0">Reguła podatkowa 23%
+            {% if r.tax_candidates|length > 1 %}
+              <div style="font-size:12px;color:var(--ink-3);margin-bottom:6px">
+                Sklep ma {{ r.tax_candidates|length }} reguły o tej nazwie — wybierz właściwą.
+                W panelu sklepu (Międzynarodowe → Podatki → Reguły podatkowe) widać tę, której używasz.
+              </div>
+              <select name="id_tax_rules_group" style="max-width:340px">
+                {% for gid, nm in r.tax_candidates %}
+                <option value="{{ gid }}" {% if gid == r.suggested_tax_group %}selected{% endif %}>
+                  ID {{ gid }} — {{ nm }}
+                </option>
+                {% endfor %}
+              </select>
+            {% else %}
+              <input type="hidden" name="id_tax_rules_group" value="{{ r.suggested_tax_group }}">
+              <div style="font-size:12px;color:var(--ink-3)">
+                {% for gid, nm in r.tax_candidates %}{{ nm }}{% endfor %}
+              </div>
+            {% endif %}
           </div>
-          <span class="pill">ID {{ r.suggested_tax_group }}</span>
+          {% if r.tax_candidates|length == 1 %}<span class="pill">ID {{ r.suggested_tax_group }}</span>{% endif %}
         </div>
       {% endif %}
       {% if r.suggested_size_feature %}
@@ -105,12 +151,13 @@
           <span class="pill">ID {{ r.suggested_size_feature }}</span>
         </div>
       {% endif %}
+      {% if r.suggested_tax_group or r.suggested_size_feature %}
       <div style="margin-top:14px">
         <button class="btn" type="submit">Zastosuj wykryte ustawienia</button>
       </div>
+      {% endif %}
     </form>
   </div>
-  {% endif %}
 {% endif %}
 
 <div class="row" style="margin-top:6px">

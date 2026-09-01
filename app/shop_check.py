@@ -24,6 +24,7 @@ CHECKS = [
     ("product_feature_values","GET",  False, "odczyt wartosci cech"),
     ("product_feature_values","POST", False, "zapis rozmiaru jako cechy"),
     ("manufacturers",         "GET",  False, "odczyt producentow (opcjonalne)"),
+    ("tax_rule_groups",       "GET",  False, "wykrycie reguly podatkowej (VAT)"),
 ]
 
 
@@ -46,6 +47,9 @@ class ShopReport:
     features: list[tuple[str, str]] = field(default_factory=list)     # (id, nazwa)
     suggested_tax_group: str | None = None
     suggested_size_feature: str | None = None
+    tax_candidates: list = field(default_factory=list)  # reguly pasujace do 23%
+    tax_readable: bool = True      # czy udalo sie odczytac liste regul podatkowych
+    features_readable: bool = True  # czy udalo sie odczytac liste cech
 
     @property
     def blocking(self) -> list[CheckResult]:
@@ -90,13 +94,13 @@ def _probe(ps: PrestaShopClient, resource: str, method: str) -> tuple[bool, str]
         return (False, f"{type(e).__name__}")
 
 
-def _list_resource(ps: PrestaShopClient, resource: str, node: str) -> list[tuple[str, str]]:
-    """Zwraca [(id, nazwa)] dla zasobu, o ile da sie odczytac."""
+def _list_resource(ps: PrestaShopClient, resource: str, node: str) -> tuple[list[tuple[str, str]], bool]:
+    """Zwraca ([(id, nazwa)], czy_odczyt_sie_powiodl)."""
     out: list[tuple[str, str]] = []
     try:
-        r = ps._client.get(f"{ps.base}/{resource}", params={"display": "[id,name]"})
+        r = ps._client.get(f"{ps.base}/{resource}", params={"display": "[id,name,active]"})
         if r.status_code >= 400:
-            return out
+            return out, False
         for el in ET.fromstring(r.text).findall(f".//{node}"):
             nid = el.findtext("id") or el.get("id") or ""
             # nazwa bywa prosta (<name>X</name>) albo wielojezyczna
@@ -107,10 +111,14 @@ def _list_resource(ps: PrestaShopClient, resource: str, node: str) -> list[tuple
             else:
                 nm = el.findtext("name") or ""
             if nid:
+                act = el.findtext("active")
+                # brak pola 'active' traktujemy jak aktywne (nie kazdy zasob je ma)
+                if act is not None and act.strip() == "0":
+                    continue          # pomijamy nieaktywne (np. stare reguly po migracji sklepu)
                 out.append((nid, (nm or "").strip()))
     except Exception:
-        pass
-    return out
+        return out, False
+    return out, True
 
 
 def run_diagnostics(base_url: str, auth_key: str) -> ShopReport:
@@ -138,13 +146,15 @@ def run_diagnostics(base_url: str, auth_key: str) -> ShopReport:
             rep.checks.append(CheckResult(resource, method, required, purpose, ok, detail))
 
         # wykrywanie ustawien
-        rep.tax_groups = _list_resource(ps, "tax_rule_groups", "tax_rule_group")
-        for gid, name in rep.tax_groups:
-            if "23" in name:
-                rep.suggested_tax_group = gid
-                break
+        rep.tax_groups, rep.tax_readable = _list_resource(ps, "tax_rule_groups", "tax_rule_group")
+        # sklep potrafi miec kilka regul o tej samej nazwie (stare, po migracji).
+        # Zbieramy wszystkie kandydatki i podpowiadamy NAJNOWSZA (najwyzsze id),
+        # ale pokazujemy uzytkownikowi, ze byl wybor.
+        rep.tax_candidates = [(gid, nm) for gid, nm in rep.tax_groups if "23" in nm]
+        if rep.tax_candidates:
+            rep.suggested_tax_group = max(rep.tax_candidates, key=lambda x: int(x[0]))[0]
 
-        rep.features = _list_resource(ps, "product_features", "product_feature")
+        rep.features, rep.features_readable = _list_resource(ps, "product_features", "product_feature")
         for fid, name in rep.features:
             if "rozmiar" in name.lower() or "size" in name.lower():
                 rep.suggested_size_feature = fid
