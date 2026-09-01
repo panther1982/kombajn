@@ -706,3 +706,57 @@ def admin_reset_password(request: Request, user_id: int,
         conn.commit()
     return RedirectResponse(f"/admin?msg=Zmieniono+haslo+dla+{target['email']}",
                             status_code=303)
+
+
+# ============================================================================
+# KREATOR PODLACZENIA SKLEPU — /shop/{id}/sprawdz
+# ============================================================================
+
+@app.get("/shop/{shop_id}/sprawdz")
+def shop_check_page(request: Request, shop_id: int):
+    """Diagnostyka sklepu: uprawnienia klucza + wykryte ustawienia."""
+    from app.shop_check import run_diagnostics
+    from app.crypto import decrypt
+
+    with db.connection() as conn:
+        user = _current_user(request, conn)
+        if not user:
+            return RedirectResponse("/login", status_code=303)
+        shop = _shop_for_user(conn, shop_id, user)
+        if not shop:
+            return RedirectResponse("/", status_code=303)
+        key = decrypt(bytes(shop["auth_key_encrypted"]), settings.fernet_key)
+
+    report = run_diagnostics(shop["base_url"], key)
+    csrf = auth.ensure_csrf_token(request.session)
+    return templates.TemplateResponse("shop_check.html", {
+        "request": request, "user": user, "shop": shop, "r": report, "csrf": csrf,
+    })
+
+
+@app.post("/shop/{shop_id}/zastosuj-wykryte")
+def shop_apply_detected(request: Request, shop_id: int,
+                        id_tax_rules_group: str = Form(""),
+                        id_size_feature: str = Form(""),
+                        csrf_token: str = Form(...)):
+    """Zapisuje ustawienia wykryte przez kreator."""
+    with db.connection() as conn:
+        user = _current_user(request, conn)
+        if not user:
+            return RedirectResponse("/login", status_code=303)
+        if not auth.check_csrf(request.session, csrf_token):
+            return RedirectResponse(f"/shop/{shop_id}?error=Sesja+wygasla", status_code=303)
+        shop = _shop_for_user(conn, shop_id, user)
+        if not shop:
+            return RedirectResponse("/", status_code=303)
+
+        sets, vals = [], []
+        if id_tax_rules_group.strip().isdigit():
+            sets.append("id_tax_rules_group = %s"); vals.append(int(id_tax_rules_group))
+        if id_size_feature.strip().isdigit():
+            sets.append("id_size_feature = %s"); vals.append(int(id_size_feature))
+        if sets:
+            vals.append(shop_id)
+            conn.execute(f"UPDATE shops SET {', '.join(sets)} WHERE id = %s", tuple(vals))
+            conn.commit()
+    return RedirectResponse(f"/shop/{shop_id}?saved=1", status_code=303)

@@ -1,15 +1,29 @@
+# ---- SEKRETY: nigdy do repozytorium ----
 .env
 .env.local
 .env.production
 *.key
 *.pem
+secrets/
+
+# ---- dane i pliki robocze ----
 data/
 /data
 *.tar.gz
+*.sqlite
+*.db
+
+# ---- Python ----
 __pycache__/
 *.py[cod]
+*.egg-info/
 .venv/
 venv/
+.pytest_cache/
+
+# ---- system / edytor ----
 .DS_Store
+Thumbs.db
 .idea/
 .vscode/
+*.swp

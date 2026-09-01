@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}Sprawdzenie sklepu — Kombajn{% endblock %}
+{% block content %}
+<h1>Sprawdzenie sklepu</h1>
+<p class="sub">{{ shop.base_url }}</p>
+
+{% if not r.reachable %}
+  <div class="flash err"><strong>Brak połączenia.</strong> {{ r.connection_error }}</div>
+  <div class="card">
+    <h2>Co sprawdzić</h2>
+    <p style="font-size:13px;color:var(--ink-2);margin:0 0 8px">
+      W panelu sklepu: <strong>Zaawansowane → Webservice</strong>. Upewnij się, że usługa
+      jest włączona, a klucz aktywny. Adres sklepu musi zaczynać się od <code>https://</code>
+      i wskazywać stronę główną (bez <code>/api</code> na końcu).
+    </p>
+  </div>
+
+{% elif r.ready %}
+  <div class="flash ok"><strong>Sklep gotowy do pracy.</strong>
+    Wszystkie wymagane uprawnienia są przyznane.</div>
+{% else %}
+  <div class="flash err"><strong>Brakuje {{ r.blocking|length }}
+    {% if r.blocking|length == 1 %}uprawnienia{% else %}uprawnień{% endif %}.</strong>
+    Bez nich część funkcji nie zadziała.</div>
+{% endif %}
+
+{% if r.reachable %}
+  {% if r.blocking %}
+  <div class="card">
+    <h2>Do włączenia w sklepie</h2>
+    <p style="font-size:13px;color:var(--ink-2);margin:0 0 12px">
+      Panel sklepu → <strong>Zaawansowane → Webservice</strong> → wybierz swój klucz →
+      zaznacz poniższe pola przy odpowiednich zasobach → zapisz.
+    </p>
+    <table>
+      <thead><tr style="border-bottom:1px solid var(--line-2)">
+        <th style="padding:7px 0">Zasób</th><th style="padding:7px 0">Zaznacz</th>
+        <th style="padding:7px 0">Do czego służy</th>
+      </tr></thead>
+      <tbody>
+        {% for c in r.blocking %}
+        <tr style="border-top:1px solid var(--line-2)">
+          <td style="padding:8px 0"><code>{{ c.resource }}</code></td>
+          <td style="padding:8px 0">
+            <span class="pill" style="background:var(--danger-bg);color:var(--danger)">
+              {% if c.method == 'GET' %}View{% elif c.method == 'POST' %}Add{% else %}Modify{% endif %}
+            </span>
+          </td>
+          <td style="padding:8px 0;color:var(--ink-2)">{{ c.purpose }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2>Wszystkie uprawnienia</h2>
+    <table>
+      <tbody>
+        {% for c in r.checks %}
+        <tr style="border-top:1px solid var(--line-2)">
+          <td style="padding:7px 0;width:26px">
+            {% if c.ok %}<span style="color:var(--ok)">✓</span>
+            {% elif c.required %}<span style="color:var(--danger)">✕</span>
+            {% else %}<span style="color:var(--ink-3)">–</span>{% endif %}
+          </td>
+          <td style="padding:7px 0"><code>{{ c.resource }}</code>
+            <span style="color:var(--ink-3);font-size:12px">{{ c.method }}</span></td>
+          <td style="padding:7px 0;color:var(--ink-2)">{{ c.purpose }}</td>
+          <td style="padding:7px 0;color:var(--ink-3);font-size:12px;text-align:right">
+            {% if not c.ok and not c.required %}opcjonalne{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if r.suggested_tax_group or r.suggested_size_feature %}
+  <div class="card">
+    <h2>Wykryte ustawienia</h2>
+    <p style="font-size:13px;color:var(--ink-2);margin:0 0 12px">
+      Odczytane bezpośrednio ze sklepu. Numery bywają różne w każdej instalacji,
+      więc warto użyć wykrytych zamiast przepisywać ręcznie.
+    </p>
+    <form method="post" action="/shop/{{ shop.id }}/zastosuj-wykryte">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      {% if r.suggested_tax_group %}
+        <input type="hidden" name="id_tax_rules_group" value="{{ r.suggested_tax_group }}">
+        <div class="shop-item">
+          <div>Reguła podatkowa 23%
+            <div style="font-size:12px;color:var(--ink-3)">
+              {% for gid, nm in r.tax_groups %}{% if gid == r.suggested_tax_group %}{{ nm }}{% endif %}{% endfor %}
+            </div>
+          </div>
+          <span class="pill">ID {{ r.suggested_tax_group }}</span>
+        </div>
+      {% endif %}
+      {% if r.suggested_size_feature %}
+        <input type="hidden" name="id_size_feature" value="{{ r.suggested_size_feature }}">
+        <div class="shop-item">
+          <div>Cecha „Rozmiar”
+            <div style="font-size:12px;color:var(--ink-3)">zapis rozmiaru z nazwy pliku</div>
+          </div>
+          <span class="pill">ID {{ r.suggested_size_feature }}</span>
+        </div>
+      {% endif %}
+      <div style="margin-top:14px">
+        <button class="btn" type="submit">Zastosuj wykryte ustawienia</button>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+{% endif %}
+
+<div class="row" style="margin-top:6px">
+  <a class="btn ghost" href="/shop/{{ shop.id }}/sprawdz">Sprawdź ponownie</a>
+  <a class="btn ghost" href="/shop/{{ shop.id }}">Ustawienia sklepu</a>
+</div>
+{% endblock %}

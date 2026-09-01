@@ -24,7 +24,10 @@
         <div style="font-weight:500">{{ shop.base_url }}</div>
         <span class="pill">{{ shop.platform }}</span>
       </div>
-      <a class="btn ghost" href="/shop/{{ shop.id }}">Ustawienia</a>
+      <div class="row" style="gap:6px">
+        <a class="btn ghost" href="/shop/{{ shop.id }}/sprawdz">Sprawdź</a>
+        <a class="btn ghost" href="/shop/{{ shop.id }}">Ustawienia</a>
+      </div>
     </div>
     {% endfor %}
   {% else %}
