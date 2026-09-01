@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Opisy — Kombajn{% endblock %}
+{% block content %}
+<h1>Generowanie opisów</h1>
+<p class="sub">Generator tworzy opis HTML, krótki opis, meta title, meta description, słowa kluczowe i ALT zdjęcia. Saldo: <strong>{{ balance }}</strong> kredytów.</p>
+
+{% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
+{% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+
+<div class="card">
+  <h2>Skanuj i dodaj do kolejki</h2>
+  <form method="post" action="/generate/scan">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+
+    <label for="shop_id">Sklep</label>
+    <select id="shop_id" name="shop_id" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit">
+      {% for s in shops %}<option value="{{ s.id }}">{{ s.base_url }}</option>{% endfor %}
+    </select>
+
+    <label>Kierunek</label>
+    <div class="row" style="gap:16px">
+      <label style="font-weight:400;margin:0"><input type="radio" name="mode" value="newest" checked> od najnowszych</label>
+      <label style="font-weight:400;margin:0"><input type="radio" name="mode" value="oldest"> od najstarszych</label>
+      <label style="font-weight:400;margin:0"><input type="radio" name="mode" value="from_id_down"> od ID w dół</label>
+      <label style="font-weight:400;margin:0"><input type="radio" name="mode" value="from_id_up"> od ID w górę</label>
+    </div>
+
+    <label for="start_id">ID startowe <span class="hint">— tylko dla trybów „od ID"</span></label>
+    <input type="text" id="start_id" name="start_id" inputmode="numeric" placeholder="np. 150">
+
+    <label for="max_jobs">Maksymalnie produktów</label>
+    <input type="text" id="max_jobs" name="max_jobs" value="20" inputmode="numeric">
+
+    <div style="margin-top:16px"><button class="btn" type="submit">Skanuj i dodaj zadania</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between;align-items:center">
+    <h2>Ostatnie zadania opisów</h2>
+  <form method="post" action="/jobs/retry" style="margin:0">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="job_type" value="description">
+    <button class="btn ghost" type="submit">Wznów wstrzymane i nieudane</button>
+  </form>
+  </div>
+  {% if jobs %}
+    {% for j in jobs %}
+    <div class="shop-item" style="align-items:flex-start">
+      <div style="min-width:0">
+        <div style="font-weight:500">Produkt {{ j.product_id or j.get('product_ref') or '?' }}</div>
+        <span class="pill">{{ j.status }} · {{ j.stage }}{% if j.result.get('_preview') %} · podgląd{% endif %}</span>
+        {% if j.result.get('meta_title') %}
+          <div class="hint" style="margin-top:6px"><strong>{{ j.result.meta_title }}</strong></div>
+          <div class="hint">{{ j.result.get('meta_description','') }}</div>
+          <div class="hint">ALT: {{ j.result.get('alt','') }}</div>
+        {% endif %}
+        {% if j.last_error %}<div class="hint" style="color:var(--danger)">{{ j.last_error }}</div>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="sub" style="margin:0">Brak zadań. Użyj skanera powyżej.</p>
+  {% endif %}
+</div>
+{% endblock %}

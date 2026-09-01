@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Produkty — Kombajn{% endblock %}
+{% block content %}
+<h1>Produkty ze zdjęć</h1>
+<p class="sub">Nazwa pliku niesie wszystkie dane. Saldo: <strong>{{ balance }}</strong> kredytów.</p>
+
+{% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
+{% if error %}
+<div class="flash err">
+  {% if " | " in error %}
+    {% set parts = error.split(" | ") %}
+    <strong>{{ parts[0] }}</strong>
+    <ul style="margin:6px 0 0;padding-left:18px">
+      {% for p in parts[1:] %}<li>{{ p }}</li>{% endfor %}
+    </ul>
+  {% else %}{{ error }}{% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Format nazwy pliku</h2>
+  <p class="mono" style="background:var(--field);border:1px solid var(--line-2);padding:10px 12px;border-radius:8px;font-size:12px;margin:0 0 10px">
+    Kolczyki Xuping Stal 316L - MF25000!9!4,5.jpg
+  </p>
+  <p class="sub" style="margin:0">
+    <strong>Kategoria</strong> (z mapy) — <strong>SYMBOL</strong> ! <strong>cena brutto</strong> ! <strong>rozmiar w cm</strong>.<br>
+    Rozmiar jest opcjonalny. Kolejne zdjęcia tego samego produktu: dopisz <span class="mono">(2)</span>, <span class="mono">(3)</span> na końcu nazwy.
+  </p>
+</div>
+
+<div class="card">
+  <h2>Wgraj zdjęcia</h2>
+  <form method="post" action="/products/upload" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label for="shop_id">Sklep</label>
+    <select id="shop_id" name="shop_id" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit">
+      {% for s in shops %}<option value="{{ s.id }}">{{ s.base_url }}</option>{% endfor %}
+    </select>
+    <label for="files">Pliki JPG lub PNG</label>
+    <input type="file" id="files" name="files" accept=".jpg,.jpeg,.png" multiple required>
+    <div style="margin-top:16px"><button class="btn" type="submit">Utwórz produkty</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between;align-items:center">
+    <h2>Ostatnie produkty</h2>
+  <form method="post" action="/jobs/retry" style="margin:0">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="job_type" value="product">
+    <button class="btn ghost" type="submit">Wznów wstrzymane i nieudane</button>
+  </form>
+  </div>
+  {% if jobs %}
+    {% for j in jobs %}
+    <div class="shop-item" style="align-items:flex-start">
+      <div style="min-width:0">
+        <div style="font-weight:500">{{ j.product_ref }}
+          {% if j.result.get('duplicate') %}<span class="hint">— istniał, dodano zdjęcia</span>{% endif %}
+          {% if j.result.get('created_inactive') %}<span class="pill" style="background:rgba(255,159,10,.16);color:#b26a00">nieaktywny</span>{% endif %}
+        </div>
+        <span class="pill">{{ j.status }} · {{ j.stage }}</span>
+        <div class="hint">{{ j.payload.get('category','') }} · {{ j.payload.get('price_gross','') }} zł brutto{% if j.payload.get('size') %} · {{ j.payload.size }} cm{% endif %} · {{ j.payload.get('photos',[])|length }} zdj.</div>
+        {% if j.product_id %}<div class="hint">ID produktu: {{ j.product_id }}</div>{% endif %}
+        {% if j.last_error %}<div class="hint" style="color:var(--danger)">{{ j.last_error }}</div>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="sub" style="margin:0">Brak zadań.</p>
+  {% endif %}
+</div>
+{% endblock %}

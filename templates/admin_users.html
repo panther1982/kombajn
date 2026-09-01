@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Użytkownicy — Kombajn{% endblock %}
+{% block content %}
+<h1>Zarządzanie użytkownikami</h1>
+<p class="sub">Panel administracyjny. Konta właściciela nie naliczają kredytów.</p>
+
+{% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
+{% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+
+<div class="card" style="padding:0;overflow:hidden">
+  <table style="width:100%;border-collapse:collapse;font-size:14px">
+    <thead>
+      <tr style="border-bottom:1px solid var(--line-2);text-align:left">
+        <th style="padding:10px 14px">E-mail</th>
+        <th style="padding:10px 14px">Klient (tenant)</th>
+        <th style="padding:10px 14px">Rola</th>
+        <th style="padding:10px 14px">Status</th>
+        <th style="padding:10px 14px">Kredyty</th>
+        <th style="padding:10px 14px">Akcje</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr style="border-top:1px solid var(--line)">
+        <td style="padding:10px 14px">
+          {{ u.email }}
+          {% if u.is_owner_account %}<span class="pill" style="background:var(--ok-bg);color:var(--ok)">właściciel</span>{% endif %}
+        </td>
+        <td style="padding:10px 14px;color:var(--muted)">{{ u.tenant_name or ('#' ~ u.tenant_id) }}</td>
+        <td style="padding:10px 14px">{{ u.role }}</td>
+        <td style="padding:10px 14px">
+          {% if u.is_active %}<span style="color:var(--ok)">aktywne</span>
+          {% else %}<span style="color:var(--danger)">wyłączone</span>{% endif %}
+        </td>
+        <td style="padding:10px 14px">
+          {% if u.credits_effective %}<span style="color:var(--danger)">nalicza</span>
+          {% else %}<span style="color:var(--muted)">nie nalicza</span>{% endif %}
+          {% if not u.is_owner_account and u.user_credits is none %}
+            <span class="pill" style="font-size:11px">dziedziczy</span>{% endif %}
+        </td>
+        <td style="padding:10px 14px">
+          <div class="row" style="gap:6px;flex-wrap:wrap">
+            {% if u.id != user.id %}
+            <form method="post" action="/admin/users/{{ u.id }}/toggle-active" style="margin:0">
+              <input type="hidden" name="csrf_token" value="{{ csrf }}">
+              <button class="btn ghost" style="font-size:13px;padding:4px 10px" type="submit">
+                {% if u.is_active %}Wyłącz{% else %}Włącz{% endif %}
+              </button>
+            </form>
+            {% endif %}
+            {% if not u.is_owner_account %}
+            <form method="post" action="/admin/users/{{ u.id }}/toggle-credits" style="margin:0">
+              <input type="hidden" name="csrf_token" value="{{ csrf }}">
+              <button class="btn ghost" style="font-size:13px;padding:4px 10px" type="submit">Kredyty</button>
+            </form>
+            {% endif %}
+            <details style="display:inline-block">
+              <summary class="btn ghost" style="font-size:13px;padding:4px 10px;list-style:none;cursor:pointer">Hasło</summary>
+              <form method="post" action="/admin/users/{{ u.id }}/reset-password"
+                    style="margin:8px 0 0;display:flex;gap:6px">
+                <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                <input type="password" name="new_password" placeholder="nowe (min 8)"
+                       style="font-size:13px;padding:4px 8px" required minlength="8">
+                <button class="btn" style="font-size:13px;padding:4px 10px" type="submit">Zmień</button>
+              </form>
+            </details>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p class="sub" style="font-size:13px">
+  „Kredyty” cyklicznie: dziedziczy z tenanta → nalicza → nie nalicza. Konta właściciela nigdy nie naliczają.
+</p>
+{% endblock %}

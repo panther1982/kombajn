@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Zdjęcia — Kombajn{% endblock %}
+{% block content %}
+<h1>Obróbka zdjęć</h1>
+<p class="sub">Wgraj zdjęcia produktów — system usunie tło, poprawi światło i przygotuje wersję katalogową. Saldo: <strong>{{ balance }}</strong> kredytów.</p>
+
+{% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
+{% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+
+<div class="card">
+  <h2>Dodaj zdjęcia</h2>
+  <form method="post" action="/images/upload" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label for="files">Pliki JPG lub PNG <span class="hint">— można wybrać wiele naraz</span></label>
+    <input type="file" id="files" name="files" accept=".jpg,.jpeg,.png" multiple required>
+    <div style="margin-top:16px"><button class="btn" type="submit">Wyślij do obróbki</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between;align-items:center">
+    <h2>Ostatnie zadania</h2>
+  <form method="post" action="/jobs/retry" style="margin:0">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="job_type" value="image">
+    <button class="btn ghost" type="submit">Wznów wstrzymane i nieudane</button>
+  </form>
+  </div>
+  {% if jobs %}
+    {% for j in jobs %}
+    <div class="shop-item">
+      <div>
+        <div style="font-weight:500">{{ j.payload.get('orig_name', 'zdjęcie') }}</div>
+        <span class="pill">{{ j.status }}{% if j.result.get('_preview') %} · podgląd{% endif %}</span>
+        {% if j.result.get('size_kb') %}<span class="hint"> {{ j.result.size_kb }} KB</span>{% endif %}
+        {% if j.last_error %}<div class="hint" style="color:var(--danger)">{{ j.last_error }}</div>{% endif %}
+      </div>
+      {% if j.result.get('output_path') %}
+        <a class="btn ghost" href="/images/file/{{ j.id }}">Pobierz</a>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="sub" style="margin:0">Nie wgrano jeszcze żadnych zdjęć.</p>
+  {% endif %}
+</div>
+{% endblock %}

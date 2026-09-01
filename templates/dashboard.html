@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Pulpit — Kombajn{% endblock %}
+{% block content %}
+<h1>{{ tenant.name }}</h1>
+<p class="sub">Przegląd konta i skróty do najczęstszych zadań.</p>
+
+<div class="tiles">
+  <div class="tile">
+    <div class="lbl">Kredyty</div>
+    <div class="val">{% if balance is none %}∞{% else %}{{ balance }}{% endif %}</div>
+  </div>
+  <div class="tile">
+    <div class="lbl">Podłączone sklepy</div>
+    <div class="val">{{ shops|length }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Sklepy</h2>
+  {% if shops %}
+    {% for shop in shops %}
+    <div class="shop-item">
+      <div style="min-width:0">
+        <div style="font-weight:500">{{ shop.base_url }}</div>
+        <span class="pill">{{ shop.platform }}</span>
+      </div>
+      <a class="btn ghost" href="/shop/{{ shop.id }}">Ustawienia</a>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="sub" style="margin:0">Nie masz jeszcze podłączonego sklepu.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Skróty</h2>
+  <div class="row">
+    <a class="btn ghost" href="/products">Dodaj produkty ze zdjęć</a>
+    <a class="btn ghost" href="/generate">Generuj opisy</a>
+    <a class="btn ghost" href="/images">Obróbka zdjęć</a>
+    <a class="btn ghost" href="/categories">Mapa kategorii</a>
+  </div>
+</div>
+{% endblock %}

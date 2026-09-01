@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Kategorie — Kombajn{% endblock %}
+{% block content %}
+<h1>Mapa kategorii</h1>
+<p class="sub">Łączy nazwę z pliku zdjęcia z kategorią w sklepie. Nazwa musi zgadzać się z tym, co jest przed „ - ” w nazwie pliku.</p>
+
+{% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
+{% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+
+<div class="card">
+  <h2>Dodaj lub zaktualizuj</h2>
+  <form method="post" action="/categories/add">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label for="shop_id">Sklep</label>
+    <select id="shop_id" name="shop_id" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit">
+      {% for s in shops %}<option value="{{ s.id }}">{{ s.base_url }}</option>{% endfor %}
+    </select>
+
+    <label for="bulk">Pary „nazwa = ID kategorii”, jedna na linię</label>
+    <textarea class="mono" id="bulk" name="bulk" spellcheck="false"
+      placeholder="Kolczyki Xuping Stal 316L = 15&#10;Naszyjniki srebrne = 22"></textarea>
+    <p class="sub" style="margin:6px 0 0">Istniejąca nazwa zostanie zaktualizowana nowym ID.</p>
+
+    <div style="margin-top:16px"><button class="btn" type="submit">Zapisz mapę</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Obecna mapa <span class="hint">({{ rows|length }})</span></h2>
+  {% if rows %}
+    {% for r in rows %}
+    <div class="shop-item">
+      <div style="font-weight:500">{{ r.source_name }}</div>
+      <span class="pill">ID {{ r.ps_category_id }}</span>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="sub" style="margin:0">Mapa jest pusta. Bez niej tworzenie produktów zatrzyma się z komunikatem o brakującej kategorii.</p>
+  {% endif %}
+</div>
+{% endblock %}

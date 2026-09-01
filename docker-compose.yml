@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: kombajn
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?ustaw POSTGRES_PASSWORD w .env}
+      POSTGRES_DB: kombajn
+    volumes:
+      - kombajn_pg:/var/lib/postgresql/data
+      # pliki .sql uruchamiaja sie w kolejnosci alfabetycznej TYLKO przy pierwszej inicjalizacji
+      - ./db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kombajn -d kombajn"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # brak sekcji ports: baza jest dostepna TYLKO w sieci compose, nie z internetu
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: python -m app.worker
+    env_file: .env
+    volumes:
+      - kombajn_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build: .
+    env_file: .env
+    volumes:
+      - kombajn_data:/data
+    # panel slucha tylko na localhost VPS-a; TLS dokladasz reverse proxy (nginx/Caddy/Traefik)
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  kombajn_pg:
+  kombajn_data:

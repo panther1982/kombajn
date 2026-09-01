@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Ustawienia sklepu — Kombajn{% endblock %}
+{% block content %}
+<div class="row" style="justify-content:space-between">
+  <div>
+    <h1>Ustawienia sklepu</h1>
+    <p class="sub">{{ shop.base_url }}</p>
+  </div>
+  <a class="btn ghost" href="/">← Panel</a>
+</div>
+
+{% if saved %}<div class="flash ok">Zapisano zmiany.</div>{% endif %}
+{% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+
+<form method="post" action="/shop/{{ shop.id }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+
+  <div class="card">
+    <h2>Generator opisów</h2>
+
+    <label>Tryb</label>
+    <div class="row" style="gap:16px">
+      <label style="font-weight:400;margin:0"><input type="radio" name="description_mode" value="single"
+        {% if shop.description_mode != 'chain' %}checked{% endif %}> jeden prompt (JSON)</label>
+      <label style="font-weight:400;margin:0"><input type="radio" name="description_mode" value="chain"
+        {% if shop.description_mode == 'chain' %}checked{% endif %}> łańcuch trzech promptów</label>
+    </div>
+    <p class="sub" style="margin:6px 0 0">
+      <strong>Jeden prompt</strong> — prompt z n8n wklejasz bez zmian do pola „Prompt opisu” poniżej.
+      Składnia <span class="mono">{{ '{{ $json.name }}' }}</span> działa. Model zwraca cały JSON naraz: jedno wywołanie zamiast trzech.<br>
+      <strong>Łańcuch</strong> — trzy osobne prompty (analiza → opis → meta), jak w skryptach <span class="mono">generate_and_update.py</span>.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Prompty</h2>
+    <p class="sub" style="margin:0 0 8px">W trybie „jeden prompt” liczy się wyłącznie pole nr 2. Poprzednie wersje trafiają do historii przy każdej zmianie.</p>
+
+    <label>1. Prompt analizy <span class="hint">— tylko tryb łańcucha; placeholdery: {NAZWA_PRODUKTU} {KOD_PRODUKTU} {KATEGORIA} {OPIS_PRODUKTU}</span></label>
+    <textarea class="prompt" name="prompt_analysis" spellcheck="false" style="min-height:160px">{{ shop.prompt_analysis }}</textarea>
+
+    <label>2. Prompt opisu <span class="hint">— tryb „jeden prompt”: wklej prompt z n8n bez zmian. Tryb łańcucha: placeholder {ANALIZA_PRODUKTU}</span></label>
+    <textarea class="prompt" name="prompt" spellcheck="false" style="min-height:160px">{{ shop.prompt }}</textarea>
+
+    <label>3. Prompt meta/SEO <span class="hint">— tylko tryb łańcucha; placeholdery: {NAZWA_PRODUKTU} {KOD_PRODUKTU} {OPIS_HTML}</span></label>
+    <textarea class="prompt" name="prompt_meta" spellcheck="false" style="min-height:160px">{{ shop.prompt_meta }}</textarea>
+  </div>
+
+  <div class="card">
+    <h2>Prompt obróbki zdjęć</h2>
+    <p class="sub" style="margin:0 0 8px">Instrukcja retuszu dla modelu obrazu (gpt-image-2).</p>
+    <textarea class="prompt" name="prompt_image" spellcheck="false" style="min-height:160px">{{ shop.prompt_image }}</textarea>
+  </div>
+
+  <div class="card">
+    <h2>Połączenie ze sklepem</h2>
+    <label for="base_url">Adres sklepu</label>
+    <input type="text" id="base_url" name="base_url" value="{{ shop.base_url }}" required>
+
+    <label for="new_auth_key">Klucz webservice
+      <span class="hint">— obecny: <span class="masked">•••••••• (ustawiony)</span>, zostaw puste, by nie zmieniać</span>
+    </label>
+    <input type="text" id="new_auth_key" name="new_auth_key" autocomplete="off" placeholder="Wpisz nowy klucz, aby zastąpić">
+  </div>
+
+  <div class="card">
+    <h2>Tworzenie produktów</h2>
+    <label for="vat_rate">Stawka VAT <span class="hint">— w procentach; ceny z nazw plików są brutto</span></label>
+    <input type="text" id="vat_rate" name="vat_rate" value="{{ (shop.vat_rate * 100)|round(2) }}">
+
+    <label for="id_tax_rules_group">ID grupy reguł podatkowych <span class="hint">— w PrestaShop</span></label>
+    <input type="text" id="id_tax_rules_group" name="id_tax_rules_group" value="{{ shop.id_tax_rules_group }}">
+
+    <label style="font-weight:400;display:flex;gap:8px;align-items:flex-start;margin-top:18px">
+      <input type="checkbox" name="create_inactive" value="1" style="margin-top:5px"
+        {% if shop.create_inactive %}checked{% endif %}>
+      <span>Twórz produkty jako <strong>nieaktywne</strong>
+        <span class="hint" style="display:block">Nowy produkt nie pojawi się w sklepie, dopóki sam go nie włączysz. Zalecane.</span>
+      </span>
+    </label>
+
+    <label for="id_size_feature">ID cechy „Rozmiar” <span class="hint">— zostaw puste, aby nie zapisywać rozmiaru</span></label>
+    <input type="text" id="id_size_feature" name="id_size_feature" value="{{ shop.id_size_feature or '' }}">
+  </div>
+
+  <div class="card">
+    <h2>Parametry</h2>
+    <p class="sub" style="margin:0 0 8px">Dodatkowe ustawienia w formacie JSON (język, ton B2B, kategoria domyślna itd.).</p>
+    <textarea class="mono" name="params_json" spellcheck="false">{{ params_json }}</textarea>
+  </div>
+
+  <button class="btn" type="submit">Zapisz zmiany</button>
+</form>
+{% endblock %}
