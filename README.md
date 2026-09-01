@@ -47,3 +47,4 @@ włączamy zapis i realne wywołanie AI.
 1. Treść promptu `prompt_opisy_produktow_v2.md` + model (wpięcie w `ai_gateway.py`).
 2. Dokładny zestaw pól przy PUT do PrestaShop (`prestashop.update_product_seo`).
 3. Przelicznik kredytów: ile kredytów za opis, ile za obróbkę zdjęcia.
+# kombajn
