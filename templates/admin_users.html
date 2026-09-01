@@ -7,6 +7,65 @@
 {% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
 {% if error %}<div class="flash err">{{ error }}</div>{% endif %}
 
+<div class="card">
+  <h2>Klienci i kredyty</h2>
+  <p class="sub" style="margin:0 0 14px">
+    Kredyty należą do klienta (firmy) — wszystkie jego konta korzystają ze wspólnej puli.
+    Wpisz liczbę dodatnią, aby doładować, ujemną, aby skorygować w dół.
+  </p>
+  {% for t in tenants %}
+  <div class="shop-item">
+    <div style="min-width:0">
+      <div style="font-weight:500">{{ t.name }}</div>
+      <div class="hint">klient #{{ t.id }} · saldo {{ t.balance }} kredytów</div>
+    </div>
+    <form method="post" action="/admin/tenants/{{ t.id }}/topup" class="row" style="gap:6px">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="text" name="amount" placeholder="np. 500" inputmode="numeric"
+             style="width:110px" required>
+      <button class="btn" type="submit">Dolicz</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+
+<details class="card">
+  <summary style="cursor:pointer;font-size:15px;font-weight:600;list-style:none">
+    + Dodaj użytkownika
+  </summary>
+  <form method="post" action="/admin/users/add" style="margin-top:14px">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+
+    <label for="ae">E-mail</label>
+    <input type="email" id="ae" name="email" required autocomplete="off">
+
+    <label for="ap">Hasło <span class="hint">— min. 8 znaków</span></label>
+    <input type="password" id="ap" name="password" required minlength="8" autocomplete="new-password">
+
+    <label for="at">Klient</label>
+    <select id="at" name="tenant_choice">
+      <option value="new">➕ Nowy klient (osobna firma, własne kredyty)</option>
+      {% for t in tenants %}
+      <option value="{{ t.id }}">Dołącz do: {{ t.name }} (#{{ t.id }})</option>
+      {% endfor %}
+    </select>
+
+    <label for="an">Nazwa nowego klienta <span class="hint">— tylko gdy zakładasz nowego</span></label>
+    <input type="text" id="an" name="tenant_name" placeholder="np. Sklep Kowalski">
+
+    <label for="ar">Rola</label>
+    <select id="ar" name="role">
+      <option value="member">member — zwykły użytkownik</option>
+      <option value="superadmin">superadmin — pełny wgląd we wszystkich klientów</option>
+    </select>
+
+    <label for="ac">Kredyty na start</label>
+    <input type="text" id="ac" name="start_credits" value="0" inputmode="numeric">
+
+    <div style="margin-top:16px"><button class="btn" type="submit">Dodaj konto</button></div>
+  </form>
+</details>
+
 <div class="card" style="padding:0;overflow:hidden">
   <table style="width:100%;border-collapse:collapse;font-size:14px">
     <thead>

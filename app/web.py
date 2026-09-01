@@ -632,9 +632,14 @@ def admin_users(request: Request, msg: str | None = None, error: str | None = No
                 effective = r["tenant_credits"]
             users.append({**dict(r), "credits_effective": effective})
 
+        tenants = conn.execute(
+            "SELECT t.id, t.name, COALESCE(c.balance, 0) AS balance "
+            "FROM tenants t LEFT JOIN tenant_credits c ON c.tenant_id = t.id "
+            "ORDER BY t.id").fetchall()
+
     csrf = auth.ensure_csrf_token(request.session)
     return templates.TemplateResponse("admin_users.html", {
-        "request": request, "user": admin, "users": users,
+        "request": request, "user": admin, "users": users, "tenants": tenants,
         "csrf": csrf, "msg": msg, "error": error,
     })
 
@@ -764,3 +769,78 @@ def shop_apply_detected(request: Request, shop_id: int,
             conn.execute(f"UPDATE shops SET {', '.join(sets)} WHERE id = %s", tuple(vals))
             conn.commit()
     return RedirectResponse(f"/shop/{shop_id}?saved=1", status_code=303)
+
+
+@app.post("/admin/users/add")
+def admin_add_user(request: Request, email: str = Form(...), password: str = Form(...),
+                   tenant_choice: str = Form("new"), tenant_name: str = Form(""),
+                   role: str = Form("member"), start_credits: str = Form("0"),
+                   csrf_token: str = Form(...)):
+    """Dodaje uzytkownika. tenant_choice='new' zaklada nowego klienta (osobny tenant),
+    albo podaje sie ID istniejacego tenanta (dolaczenie do firmy)."""
+    from urllib.parse import quote
+    with db.connection() as conn:
+        admin = _require_superadmin(request, conn)
+        if not admin:
+            return RedirectResponse("/", status_code=303)
+        if not auth.check_csrf(request.session, csrf_token):
+            return RedirectResponse("/admin?error=Sesja+wygasla", status_code=303)
+
+        email = (email or "").strip().lower()
+        if "@" not in email or len(password) < 8:
+            return RedirectResponse(
+                "/admin?error=Podaj+poprawny+email+i+haslo+min+8+znakow", status_code=303)
+        if conn.execute("SELECT 1 FROM users WHERE email = %s", (email,)).fetchone():
+            return RedirectResponse(
+                f"/admin?error={quote('Konto ' + email + ' juz istnieje')}", status_code=303)
+
+        if tenant_choice == "new":
+            nazwa = tenant_name.strip() or email.split("@")[1]
+            tid = conn.execute("INSERT INTO tenants (name) VALUES (%s) RETURNING id",
+                               (nazwa,)).fetchone()["id"]
+        elif tenant_choice.isdigit():
+            row = conn.execute("SELECT id FROM tenants WHERE id = %s",
+                               (int(tenant_choice),)).fetchone()
+            if not row:
+                return RedirectResponse("/admin?error=Nie+ma+takiego+klienta", status_code=303)
+            tid = row["id"]
+        else:
+            return RedirectResponse("/admin?error=Wybierz+klienta", status_code=303)
+
+        uid = auth.create_user(conn, tid, email, password,
+                               role="superadmin" if role == "superadmin" else "member")
+        if start_credits.strip().isdigit() and int(start_credits) > 0:
+            credits.topup(conn, tid, int(start_credits), reason=f"start (dodal {admin['email']})")
+        conn.commit()
+    return RedirectResponse(f"/admin?msg={quote('Dodano konto ' + email)}", status_code=303)
+
+
+@app.post("/admin/tenants/{tenant_id}/topup")
+def admin_topup(request: Request, tenant_id: int, amount: str = Form(...),
+                csrf_token: str = Form(...)):
+    """Doladowanie kredytow klientowi (pula wspolna dla jego kont)."""
+    from urllib.parse import quote
+    with db.connection() as conn:
+        admin = _require_superadmin(request, conn)
+        if not admin:
+            return RedirectResponse("/", status_code=303)
+        if not auth.check_csrf(request.session, csrf_token):
+            return RedirectResponse("/admin?error=Sesja+wygasla", status_code=303)
+        if not amount.strip().lstrip("-").isdigit() or int(amount) == 0:
+            return RedirectResponse("/admin?error=Podaj+liczbe+kredytow", status_code=303)
+
+        t = conn.execute("SELECT name FROM tenants WHERE id = %s", (tenant_id,)).fetchone()
+        if not t:
+            return RedirectResponse("/admin?error=Nie+ma+takiego+klienta", status_code=303)
+
+        n = int(amount)
+        if n > 0:
+            saldo = credits.topup(conn, tenant_id, n, reason=f"doladowanie ({admin['email']})")
+        else:
+            # korekta w dol - bezposrednio, bo charge blokuje ponizej zera
+            conn.execute("UPDATE tenant_credits SET balance = GREATEST(0, balance + %s) "
+                         "WHERE tenant_id = %s", (n, tenant_id))
+            saldo = credits.get_balance(conn, tenant_id)
+        conn.commit()
+    return RedirectResponse(
+        f"/admin?msg={quote(t['name'] + f': saldo {saldo} kredytow')}", status_code=303)
