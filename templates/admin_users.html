@@ -26,21 +26,60 @@
       <button class="btn" type="submit">Dolicz</button>
     </form>
   </div>
+  <details style="margin:0 0 14px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--accent);list-style:none">
+      Warunki klienta {{ t.name }}
+    </summary>
+    <form method="post" action="/admin/tenants/{{ t.id }}/terms"
+          style="margin:10px 0 0;padding:14px;background:var(--bg);border-radius:10px">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <div class="row" style="gap:14px;align-items:flex-start">
+        <div style="flex:1;min-width:150px">
+          <label style="margin-top:0">Kredyty za opis <span class="hint">puste = domyślnie</span></label>
+          <input type="text" name="cost_description" value="{{ t.cost_description or '' }}" inputmode="numeric">
+        </div>
+        <div style="flex:1;min-width:150px">
+          <label style="margin-top:0">Kredyty za zdjęcie</label>
+          <input type="text" name="cost_image" value="{{ t.cost_image or '' }}" inputmode="numeric">
+        </div>
+      </div>
+      <div class="row" style="gap:14px;align-items:flex-start">
+        <div style="flex:1;min-width:150px">
+          <label>Limit dzienny <span class="hint">operacji; puste = bez limitu</span></label>
+          <input type="text" name="limit_daily" value="{{ t.limit_daily or '' }}" inputmode="numeric">
+        </div>
+        <div style="flex:1;min-width:150px">
+          <label>Limit miesięczny</label>
+          <input type="text" name="limit_monthly" value="{{ t.limit_monthly or '' }}" inputmode="numeric">
+        </div>
+      </div>
+      <label style="margin-bottom:8px">Dostęp do funkcji</label>
+      <div class="row" style="gap:16px">
+        <label style="font-weight:400;margin:0;display:flex;gap:7px;align-items:center">
+          <input type="checkbox" name="allow_descriptions" value="1" {% if t.allow_descriptions %}checked{% endif %}> Opisy</label>
+        <label style="font-weight:400;margin:0;display:flex;gap:7px;align-items:center">
+          <input type="checkbox" name="allow_images" value="1" {% if t.allow_images %}checked{% endif %}> Zdjęcia</label>
+        <label style="font-weight:400;margin:0;display:flex;gap:7px;align-items:center">
+          <input type="checkbox" name="allow_products" value="1" {% if t.allow_products %}checked{% endif %}> Produkty</label>
+      </div>
+      <div style="margin-top:14px"><button class="btn" type="submit">Zapisz warunki</button></div>
+    </form>
+  </details>
   {% endfor %}
 </div>
 
 <details class="card">
   <summary style="cursor:pointer;font-size:15px;font-weight:600;list-style:none">
-    + Dodaj użytkownika
+    + Zaproś klienta (mailem)
   </summary>
-  <form method="post" action="/admin/users/add" style="margin-top:14px">
+  <p class="sub" style="margin:12px 0 0">
+    Klient dostanie link i sam ustawi hasło. Link jest ważny 7 dni.
+  </p>
+  <form method="post" action="/admin/invite" style="margin-top:8px">
     <input type="hidden" name="csrf_token" value="{{ csrf }}">
 
     <label for="ae">E-mail</label>
     <input type="email" id="ae" name="email" required autocomplete="off">
-
-    <label for="ap">Hasło <span class="hint">— min. 8 znaków</span></label>
-    <input type="password" id="ap" name="password" required minlength="8" autocomplete="new-password">
 
     <label for="at">Klient</label>
     <select id="at" name="tenant_choice">
@@ -61,6 +100,46 @@
 
     <label for="ac">Kredyty na start</label>
     <input type="text" id="ac" name="start_credits" value="0" inputmode="numeric">
+
+    <div style="margin-top:16px"><button class="btn" type="submit">Wyślij zaproszenie</button></div>
+  </form>
+</details>
+
+<details class="card">
+  <summary style="cursor:pointer;font-size:15px;font-weight:600;list-style:none">
+    + Dodaj użytkownika ręcznie (ustawiasz hasło)
+  </summary>
+  <p class="sub" style="margin:12px 0 0">
+    Konto działa od razu. Hasło przekazujesz klientowi sam.
+  </p>
+  <form method="post" action="/admin/users/add" style="margin-top:8px">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+
+    <label for="me">E-mail</label>
+    <input type="email" id="me" name="email" required autocomplete="off">
+
+    <label for="mp">Hasło <span class="hint">— min. 8 znaków</span></label>
+    <input type="password" id="mp" name="password" required minlength="8" autocomplete="new-password">
+
+    <label for="mt">Klient</label>
+    <select id="mt" name="tenant_choice">
+      <option value="new">➕ Nowy klient (osobna firma, własne kredyty i warunki)</option>
+      {% for t in tenants %}
+      <option value="{{ t.id }}">Dołącz do: {{ t.name }} (#{{ t.id }})</option>
+      {% endfor %}
+    </select>
+
+    <label for="mn">Nazwa nowego klienta <span class="hint">— tylko gdy zakładasz nowego</span></label>
+    <input type="text" id="mn" name="tenant_name" placeholder="np. Sklep Kowalski">
+
+    <label for="mr">Rola</label>
+    <select id="mr" name="role">
+      <option value="member">member — zwykły użytkownik</option>
+      <option value="superadmin">superadmin — pełny wgląd we wszystkich klientów</option>
+    </select>
+
+    <label for="mc">Kredyty na start</label>
+    <input type="text" id="mc" name="start_credits" value="0" inputmode="numeric">
 
     <div style="margin-top:16px"><button class="btn" type="submit">Dodaj konto</button></div>
   </form>

@@ -52,6 +52,12 @@ REQUIRED_FIELDS = ["description", "description_short", "meta_title",
 # limity SEO z promptu (twarde limity PrestaShop sa wyzsze)
 SOFT_LIMITS = {"meta_title": 255, "meta_description": 512, "alt": 125}
 
+# Pola, ktorych przekroczenie limitu NIE blokuje publikacji.
+# 'alt' nie jest zapisywany do PrestaShop (webservice 1.7 nie wystawia legendy
+# zdjecia), wiec odrzucanie produktu z tego powodu blokowaloby publikacje
+# przez pole, ktore i tak nigdzie nie trafia. Zamiast tego przycinamy.
+NIEBLOKUJACE = {"alt"}
+
 
 def _visible_text(html: str) -> str:
     return " ".join(_re.sub(r"<[^>]+>", " ", html or "").split())
@@ -83,6 +89,11 @@ def validate_single_output(fields: dict, min_visible: int = 400) -> None:
     for field, limit in SOFT_LIMITS.items():
         value = fields.get(field) or ""
         if len(value) > limit:
+            if field in NIEBLOKUJACE:
+                # przytnij na granicy slowa, bez przerywania publikacji
+                uciety = value[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-")
+                fields[field] = uciety or value[:limit]
+                continue
             raise ValidationError(f"Pole {field} przekracza limit {limit} znakow")
 
     short = fields["description_short"]

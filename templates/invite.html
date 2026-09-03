@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Zaproszenie — Kombajn{% endblock %}
+{% block content_guest %}
+{% if invalid %}
+  <div class="card">
+    <h1>Zaproszenie nieważne</h1>
+    <p class="sub">Link wygasł albo został już użyty. Poproś o nowe zaproszenie.</p>
+    <a class="btn ghost" href="/login">Przejdź do logowania</a>
+  </div>
+{% else %}
+  <div class="card">
+    <h1>Ustaw hasło</h1>
+    <p class="sub">Konto <strong>{{ email }}</strong> · {{ tenant_name }}</p>
+    {% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+    <form method="post" action="/zaproszenie/{{ token }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label for="p1">Hasło <span class="hint">— min. 8 znaków</span></label>
+      <input type="password" id="p1" name="password" required minlength="8" autocomplete="new-password">
+      <label for="p2">Powtórz hasło</label>
+      <input type="password" id="p2" name="password2" required minlength="8" autocomplete="new-password">
+      <div style="margin-top:18px"><button class="btn" type="submit">Aktywuj konto</button></div>
+    </form>
+  </div>
+{% endif %}
+{% endblock %}

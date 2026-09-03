@@ -171,7 +171,7 @@ def _normalize_fields(raw: dict) -> dict:
 
 
 def generate_description_single(product: dict, prompt: str, image_bytes: bytes | None,
-                                api_key: str) -> Generation:
+                                api_key: str, poprawka: str = "") -> Generation:
     """Jedno wywolanie -> pelny JSON (opis, meta, ALT).
 
     Prompt moze uzywac skladni n8n ({{ $json.name }}), wiec da sie go wkleic
@@ -184,6 +184,10 @@ def generate_description_single(product: dict, prompt: str, image_bytes: bytes |
     client = Anthropic(api_key=api_key)
 
     rendered = render_n8n_template(prompt, product)
+    if poprawka:
+        # druga proba: mowimy modelowi wprost, co bylo nie tak
+        rendered += (f"\n\nUWAGA — poprzednia odpowiedz zostala odrzucona: {poprawka}\n"
+                     f"Popraw to i zwroc poprawny JSON. Zachowaj pozostale wymagania.")
     content = [{"type": "text", "text": rendered}]
     if image_bytes:
         content.insert(0, {"type": "image", "source": {

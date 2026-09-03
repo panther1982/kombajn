@@ -4,6 +4,14 @@
 <h1>Mapa kategorii</h1>
 <p class="sub">Łączy nazwę z pliku zdjęcia z kategorią w sklepie. Nazwa musi zgadzać się z tym, co jest przed „ - ” w nazwie pliku.</p>
 
+{% if shops %}
+<div class="row" style="margin:0 0 16px">
+  {% for s in shops %}
+  <a class="btn ghost" href="/categories/sync/{{ s.id }}">Mapuj automatycznie: {{ s.base_url }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+
 {% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
 {% if error %}<div class="flash err">{{ error }}</div>{% endif %}
 

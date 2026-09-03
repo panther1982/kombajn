@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import auth, credits, db
+from app import auth, credits, db, terms, batches
 from app.url_guard import validate_shop_url, UnsafeURL
 from app.config import Settings
 from app.crypto import encrypt
@@ -41,6 +41,16 @@ app.add_middleware(
 
 
 # --- pomocnicze --------------------------------------------------------------
+
+def _blocked(conn, tenant_id: int, feature: str) -> str | None:
+    """Zwraca komunikat, gdy klient nie ma dostepu do funkcji albo wyczerpal limit."""
+    try:
+        terms.check_feature(conn, tenant_id, feature)
+        terms.check_limits(conn, tenant_id)
+    except (terms.FeatureDisabled, terms.LimitReached) as e:
+        return str(e)
+    return None
+
 
 def _current_user(request: Request, conn):
     uid = request.session.get("user_id")
@@ -276,7 +286,7 @@ async def images_upload(request: Request, files: list[UploadFile] = File(...),
         incoming = _Path(settings.data_dir) / "incoming" / str(user["tenant_id"])
         incoming.mkdir(parents=True, exist_ok=True)
 
-        accepted, rejected = 0, 0
+        accepted, rejected, batch_id = 0, 0, None
         for f in files:
             ext = _Path(f.filename or "").suffix.lower()
             if ext not in _ALLOWED_EXT:
@@ -289,10 +299,15 @@ async def images_upload(request: Request, files: list[UploadFile] = File(...),
                 return RedirectResponse(
                     f"/images?error=Brak+dostepu+do+katalogu+danych+({type(e).__name__})."
                     f"+Sprawdz+uprawnienia+wolumenu+/data", status_code=303)
-            _jobs.enqueue(conn, user["tenant_id"], shop_id=None, product_ref=None,
-                          job_type="image",
+            if batch_id is None:
+                batch_id = batches.create(conn, user["tenant_id"], user, "image", len(files))
+            _jobs.enqueue(conn, user["tenant_id"], shop_id=None, product_ref=f.filename,
+                          job_type="image", batch_id=batch_id,
                           payload={"input_path": str(dest), "orig_name": f.filename})
             accepted += 1
+        if batch_id and accepted != len(files):
+            # partia liczy tylko faktycznie przyjete pliki
+            conn.execute("UPDATE batches SET total = %s WHERE id = %s", (accepted, batch_id))
         conn.commit()
 
     msg = f"Przyjeto+{accepted}+zdjec"
@@ -374,13 +389,19 @@ def generate_scan(request: Request, shop_id: int = Form(...), mode: str = Form(.
             ps.close()
 
         # pomin produkty, ktore juz maja aktywne/zakonczone zadanie
+        blok = _blocked(conn, user["tenant_id"], "descriptions")
+        if blok:
+            from urllib.parse import quote
+            return RedirectResponse(f"/generate?error={quote(blok)}", status_code=303)
+
         existing = {r["product_id"] for r in conn.execute(
             "SELECT product_id FROM jobs WHERE tenant_id=%s AND type='description' "
             "AND status IN ('pending','running','held','done')", (user["tenant_id"],)).fetchall()}
         new_ids = [pid for pid in ids if pid not in existing]
 
+        batch_id = batches.create(conn, user["tenant_id"], user, "description", len(new_ids))
         for pid in new_ids:
-            _jobs.enqueue(conn, user["tenant_id"], shop["id"], product_ref=str(pid),
+            _jobs.enqueue(conn, user["tenant_id"], shop["id"], product_ref=str(pid), batch_id=batch_id,
                           job_type="description", payload={"product_id": pid})
         conn.commit()
 
@@ -499,6 +520,11 @@ async def products_upload(request: Request, shop_id: int = Form(...),
                 f"/products?error=Brak+dostepu+do+katalogu+danych+({type(e).__name__})",
                 status_code=303)
 
+        blok = _blocked(conn, user["tenant_id"], "products")
+        if blok:
+            from urllib.parse import quote
+            return RedirectResponse(f"/products?error={quote(blok)}", status_code=303)
+
         parsed, errors = [], []
         for f in files:
             name = f.filename or "(bez nazwy)"
@@ -527,15 +553,22 @@ async def products_upload(request: Request, shop_id: int = Form(...),
                 continue
             parsed.append((p, dest))
 
+        batch_id = None
+        blok = _blocked(conn, user["tenant_id"], "images")
+        if blok:
+            from urllib.parse import quote
+            return RedirectResponse(f"/images?error={quote(blok)}", status_code=303)
+
         groups = group_by_symbol([p for p, _ in parsed])
         paths = {(p.orig_name, p.photo_index): str(d) for p, d in parsed}
 
         created = 0
+        batch_id = batches.create(conn, user["tenant_id"], user, "product", len(groups))
         for symbol, items in groups.items():
             photos = [{"path": paths[(i.orig_name, i.photo_index)],
                        "orig_name": i.orig_name, "index": i.photo_index} for i in items]
             first = items[0]
-            _jobs.enqueue(conn, user["tenant_id"], shop["id"], product_ref=symbol,
+            _jobs.enqueue(conn, user["tenant_id"], shop["id"], product_ref=symbol, batch_id=batch_id,
                           job_type="product",
                           payload={"symbol": symbol, "category": first.category,
                                    "price_gross": str(first.price_gross),
@@ -633,7 +666,9 @@ def admin_users(request: Request, msg: str | None = None, error: str | None = No
             users.append({**dict(r), "credits_effective": effective})
 
         tenants = conn.execute(
-            "SELECT t.id, t.name, COALESCE(c.balance, 0) AS balance "
+            "SELECT t.id, t.name, COALESCE(c.balance, 0) AS balance, "
+            "       t.cost_description, t.cost_image, t.limit_daily, t.limit_monthly, "
+            "       t.allow_descriptions, t.allow_images, t.allow_products "
             "FROM tenants t LEFT JOIN tenant_credits c ON c.tenant_id = t.id "
             "ORDER BY t.id").fetchall()
 
@@ -844,3 +879,246 @@ def admin_topup(request: Request, tenant_id: int, amount: str = Form(...),
         conn.commit()
     return RedirectResponse(
         f"/admin?msg={quote(t['name'] + f': saldo {saldo} kredytow')}", status_code=303)
+
+
+# ============================================================================
+# ZAPROSZENIA KLIENTOW — dodanie po mailu, klient sam ustawia haslo
+# ============================================================================
+
+@app.post("/admin/invite")
+def admin_invite(request: Request, email: str = Form(...),
+                 tenant_choice: str = Form("new"), tenant_name: str = Form(""),
+                 role: str = Form("member"), start_credits: str = Form("0"),
+                 csrf_token: str = Form(...)):
+    import secrets
+    from datetime import datetime, timedelta, timezone
+    from urllib.parse import quote
+    from app import mailer
+
+    with db.connection() as conn:
+        admin = _require_superadmin(request, conn)
+        if not admin:
+            return RedirectResponse("/", status_code=303)
+        if not auth.check_csrf(request.session, csrf_token):
+            return RedirectResponse("/admin?error=Sesja+wygasla", status_code=303)
+
+        email = (email or "").strip().lower()
+        if "@" not in email:
+            return RedirectResponse("/admin?error=Podaj+poprawny+email", status_code=303)
+        if conn.execute("SELECT 1 FROM users WHERE email = %s", (email,)).fetchone():
+            return RedirectResponse(
+                f"/admin?error={quote('Konto ' + email + ' juz istnieje')}", status_code=303)
+
+        if tenant_choice == "new":
+            tid = conn.execute("INSERT INTO tenants (name) VALUES (%s) RETURNING id",
+                               (tenant_name.strip() or email.split("@")[1],)).fetchone()["id"]
+        elif tenant_choice.isdigit():
+            row = conn.execute("SELECT id FROM tenants WHERE id = %s",
+                               (int(tenant_choice),)).fetchone()
+            if not row:
+                return RedirectResponse("/admin?error=Nie+ma+takiego+klienta", status_code=303)
+            tid = row["id"]
+        else:
+            return RedirectResponse("/admin?error=Wybierz+klienta", status_code=303)
+
+        if start_credits.strip().isdigit() and int(start_credits) > 0:
+            credits.topup(conn, tid, int(start_credits), reason=f"start ({admin['email']})")
+
+        token = secrets.token_urlsafe(32)
+        conn.execute(
+            "INSERT INTO invitations (token, email, tenant_id, role, invited_by, expires_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s)",
+            (token, email, tid, "superadmin" if role == "superadmin" else "member",
+             admin["id"], datetime.now(timezone.utc) + timedelta(days=7)))
+        tname = conn.execute("SELECT name FROM tenants WHERE id=%s", (tid,)).fetchone()["name"]
+        conn.commit()
+
+    base = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/") or str(request.base_url).rstrip("/")
+    link = f"{base}/zaproszenie/{token}"
+    subject, body = mailer.invitation_body(link, tname, admin["email"])
+    try:
+        wyslano = mailer.send(email, subject, body)
+    except mailer.MailError as e:
+        return RedirectResponse(f"/admin?error={quote(str(e)[:160])}", status_code=303)
+
+    if wyslano:
+        return RedirectResponse(f"/admin?msg={quote('Zaproszenie wyslane na ' + email)}",
+                                status_code=303)
+    return RedirectResponse(
+        f"/admin?msg={quote('SMTP nieskonfigurowany. Przekaz link recznie: ' + link)}",
+        status_code=303)
+
+
+@app.get("/zaproszenie/{token}")
+def invite_form(request: Request, token: str, error: str | None = None):
+    with db.connection() as conn:
+        inv = conn.execute(
+            "SELECT i.email, t.name AS tenant_name FROM invitations i "
+            "JOIN tenants t ON t.id = i.tenant_id "
+            "WHERE i.token = %s AND i.used_at IS NULL AND i.expires_at > now()",
+            (token,)).fetchone()
+    if not inv:
+        return templates.TemplateResponse("invite.html", {
+            "request": request, "user": None, "invalid": True, "token": token})
+    csrf = auth.ensure_csrf_token(request.session)
+    return templates.TemplateResponse("invite.html", {
+        "request": request, "user": None, "invalid": False, "token": token,
+        "email": inv["email"], "tenant_name": inv["tenant_name"],
+        "csrf": csrf, "error": error})
+
+
+@app.post("/zaproszenie/{token}")
+def invite_accept(request: Request, token: str, password: str = Form(...),
+                  password2: str = Form(...), csrf_token: str = Form(...)):
+    from urllib.parse import quote
+    if not auth.check_csrf(request.session, csrf_token):
+        return RedirectResponse(f"/zaproszenie/{token}?error=Sesja+wygasla", status_code=303)
+    if len(password) < 8:
+        return RedirectResponse(f"/zaproszenie/{token}?error=Haslo+min+8+znakow", status_code=303)
+    if password != password2:
+        return RedirectResponse(f"/zaproszenie/{token}?error=Hasla+nie+sa+takie+same",
+                                status_code=303)
+
+    with db.connection() as conn:
+        inv = conn.execute(
+            "SELECT id, email, tenant_id, role FROM invitations "
+            "WHERE token = %s AND used_at IS NULL AND expires_at > now()",
+            (token,)).fetchone()
+        if not inv:
+            return RedirectResponse("/login?error=Zaproszenie+wygaslo", status_code=303)
+        if conn.execute("SELECT 1 FROM users WHERE email = %s", (inv["email"],)).fetchone():
+            return RedirectResponse("/login?error=Konto+juz+istnieje", status_code=303)
+
+        uid = auth.create_user(conn, inv["tenant_id"], inv["email"], password, role=inv["role"])
+        conn.execute("UPDATE invitations SET used_at = now() WHERE id = %s", (inv["id"],))
+        conn.commit()
+    request.session["user_id"] = uid
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/admin/tenants/{tenant_id}/terms")
+def admin_save_terms(request: Request, tenant_id: int,
+                     cost_description: str = Form(""), cost_image: str = Form(""),
+                     limit_daily: str = Form(""), limit_monthly: str = Form(""),
+                     allow_descriptions: str = Form(""), allow_images: str = Form(""),
+                     allow_products: str = Form(""), csrf_token: str = Form(...)):
+    """Zapis indywidualnych warunkow klienta."""
+    from urllib.parse import quote
+    with db.connection() as conn:
+        admin = _require_superadmin(request, conn)
+        if not admin:
+            return RedirectResponse("/", status_code=303)
+        if not auth.check_csrf(request.session, csrf_token):
+            return RedirectResponse("/admin?error=Sesja+wygasla", status_code=303)
+
+        def num(v):
+            v = (v or "").strip()
+            return int(v) if v.isdigit() else None
+
+        conn.execute(
+            "UPDATE tenants SET cost_description=%s, cost_image=%s, limit_daily=%s, "
+            "limit_monthly=%s, allow_descriptions=%s, allow_images=%s, allow_products=%s "
+            "WHERE id=%s",
+            (num(cost_description), num(cost_image), num(limit_daily), num(limit_monthly),
+             allow_descriptions == "1", allow_images == "1", allow_products == "1", tenant_id))
+        t = conn.execute("SELECT name FROM tenants WHERE id=%s", (tenant_id,)).fetchone()
+        conn.commit()
+    return RedirectResponse(f"/admin?msg={quote('Zapisano warunki: ' + t['name'])}",
+                            status_code=303)
+
+
+# ============================================================================
+# AUTOMATYCZNE MAPOWANIE KATEGORII
+# ============================================================================
+
+@app.get("/categories/sync/{shop_id}")
+def categories_sync(request: Request, shop_id: int, msg: str | None = None,
+                    error: str | None = None):
+    """Import kategorii ze sklepu + propozycje dla nazw nierozpoznanych."""
+    from app.category_sync import pobierz_kategorie, dopasuj
+    from app.crypto import decrypt
+
+    with db.connection() as conn:
+        user = _current_user(request, conn)
+        if not user:
+            return RedirectResponse("/login", status_code=303)
+        shop = _shop_for_user(conn, shop_id, user)
+        if not shop:
+            return RedirectResponse("/", status_code=303)
+        key = decrypt(bytes(shop["auth_key_encrypted"]), settings.fernet_key)
+
+        istniejace = {r["source_name"].strip().lower() for r in conn.execute(
+            "SELECT source_name FROM category_map WHERE shop_id=%s", (shop_id,)).fetchall()}
+
+        # nazwy z plikow, ktore nie trafily do mapy (zadania wstrzymane)
+        nierozpoznane = [r["nazwa"] for r in conn.execute(
+            "SELECT DISTINCT payload->>'category' AS nazwa FROM jobs "
+            "WHERE tenant_id=%s AND type='product' AND payload->>'category' IS NOT NULL "
+            "ORDER BY 1", (user["tenant_id"],)).fetchall()
+            if r["nazwa"] and r["nazwa"].strip().lower() not in istniejace]
+
+    kategorie, blad = pobierz_kategorie(shop["base_url"], key)
+    nowe = [k for k in kategorie if k.nazwa.strip().lower() not in istniejace]
+    propozycje = dopasuj(nierozpoznane, kategorie) if kategorie else []
+
+    csrf = auth.ensure_csrf_token(request.session)
+    return templates.TemplateResponse("categories_sync.html", {
+        "request": request, "user": user, "shop": shop, "csrf": csrf,
+        "kategorie": kategorie, "nowe": nowe, "propozycje": propozycje,
+        "blad": blad or error, "msg": msg,
+    })
+
+
+@app.post("/categories/sync/{shop_id}/apply")
+def categories_sync_apply(request: Request, shop_id: int,
+                          tryb: str = Form("import"), wybrane: list[str] = Form([]),
+                          csrf_token: str = Form(...)):
+    """tryb='import' - wpisuje kategorie ze sklepu 1:1.
+       tryb='propozycje' - zapisuje zaznaczone dopasowania."""
+    from urllib.parse import quote
+    from app.category_sync import pobierz_kategorie
+    from app.crypto import decrypt
+
+    with db.connection() as conn:
+        user = _current_user(request, conn)
+        if not user:
+            return RedirectResponse("/login", status_code=303)
+        if not auth.check_csrf(request.session, csrf_token):
+            return RedirectResponse(f"/categories/sync/{shop_id}?error=Sesja+wygasla",
+                                    status_code=303)
+        shop = _shop_for_user(conn, shop_id, user)
+        if not shop:
+            return RedirectResponse("/", status_code=303)
+
+        dodane = 0
+        if tryb == "import":
+            key = decrypt(bytes(shop["auth_key_encrypted"]), settings.fernet_key)
+            kategorie, blad = pobierz_kategorie(shop["base_url"], key)
+            if blad:
+                return RedirectResponse(
+                    f"/categories/sync/{shop_id}?error={quote(blad)}", status_code=303)
+            for k in kategorie:
+                r = conn.execute(
+                    "INSERT INTO category_map (shop_id, source_name, ps_category_id) "
+                    "VALUES (%s,%s,%s) ON CONFLICT DO NOTHING RETURNING id",
+                    (shop_id, k.nazwa, k.id)).fetchone()
+                if r:
+                    dodane += 1
+        else:
+            for poz in wybrane:
+                # format: "nazwa zrodlowa||id_kategorii"
+                if "||" not in poz:
+                    continue
+                src, cid = poz.rsplit("||", 1)
+                if not cid.strip().isdigit():
+                    continue
+                r = conn.execute(
+                    "INSERT INTO category_map (shop_id, source_name, ps_category_id) "
+                    "VALUES (%s,%s,%s) ON CONFLICT DO NOTHING RETURNING id",
+                    (shop_id, src.strip(), int(cid))).fetchone()
+                if r:
+                    dodane += 1
+        conn.commit()
+    return RedirectResponse(
+        f"/categories/sync/{shop_id}?msg={quote(f'Dodano {dodane} pozycji do mapy')}",
+        status_code=303)

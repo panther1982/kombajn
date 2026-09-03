@@ -5,6 +5,7 @@ from app import db, jobs
 from app.config import Settings
 from app.crypto import decrypt
 from app.pipeline import run_description_job, run_image_job, run_product_job
+from app import batches
 
 
 def _load_shop(conn, shop_id: int) -> dict:
@@ -48,6 +49,13 @@ def process_one(settings: Settings) -> bool:
             conn.rollback()
             jobs.fail(conn, job["id"], f"{type(e).__name__}: {e}")
             conn.commit()
+
+        # Po kazdym zadaniu sprawdzamy, czy domknela sie cala partia.
+        # Bledy powiadomienia nie moga przerwac przetwarzania kolejki.
+        try:
+            batches.maybe_notify(conn, job.get("batch_id"))
+        except Exception as e:  # noqa: BLE001
+            print(f"[worker] powiadomienie partii nieudane: {type(e).__name__}: {e}", flush=True)
         return True
 
 

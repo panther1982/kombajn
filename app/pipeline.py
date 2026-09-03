@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from app import ai_gateway, credits, jobs
+from app import terms
 
 
 def output_filename(orig_name: str) -> str:
@@ -76,20 +77,40 @@ def run_description_job(conn, job: dict, shop: dict, auth_key: str,
                 }
                 gen = ai_gateway.generate_description_chain(product, image_bytes,
                                                             prompts, api_key)
-            cost = gen.cost_credits
+            # stawka klienta (moze byc indywidualna); 0 = tryb podgladu
+            cost = terms.load(conn, tenant_id).cost_description if gen.cost_credits else 0
 
             if not gen.preview_mode:
-                try:
+                def _sprawdz(g):
                     if mode == "single":
-                        validate_single_output(gen.fields)
+                        validate_single_output(g.fields)
                     else:
                         validate_generated_content(product["name"],
-                                                   gen.fields.get("description", ""),
-                                                   gen.fields)
+                                                   g.fields.get("description", ""), g.fields)
+                try:
+                    _sprawdz(gen)
                 except ValidationError as ve:
-                    jobs.fail(conn, job["id"], f"walidacja: {ve}")
-                    conn.commit()
-                    return
+                    # DRUGA PROBA: mowimy modelowi, co bylo nie tak, i prosimy o poprawke.
+                    # Jedno ponowienie - wiecej nie oplaca sie (kazde to koszt wywolania).
+                    if mode == "single":
+                        try:
+                            gen = ai_gateway.generate_description_single(
+                                product, shop.get("prompt") or "", image_bytes, api_key,
+                                poprawka=str(ve))
+                            _sprawdz(gen)
+                            cost = terms.load(conn, tenant_id).cost_description if gen.cost_credits else 0
+                        except ValidationError as ve2:
+                            jobs.fail(conn, job["id"], f"walidacja (po poprawce): {ve2}")
+                            conn.commit()
+                            return
+                        except Exception as e2:
+                            jobs.fail(conn, job["id"], f"ponowienie nieudane: {type(e2).__name__}")
+                            conn.commit()
+                            return
+                    else:
+                        jobs.fail(conn, job["id"], f"walidacja: {ve}")
+                        conn.commit()
+                        return
 
             if cost and credits.credits_enabled(conn, tenant_id) and credits.get_balance(conn, tenant_id) < cost:
                 jobs.hold(conn, job["id"], "brak kredytow")
@@ -148,7 +169,8 @@ def run_image_job(conn, job: dict, shop_prompt_image: str, openai_key: str,
     data = input_path.read_bytes()
     result = ai_gateway.process_image(data, shop_prompt_image, openai_key)
 
-    if result.cost_credits and credits.credits_enabled(conn, tenant_id) and credits.get_balance(conn, tenant_id) < result.cost_credits:
+    koszt_zdjecia = terms.load(conn, tenant_id).cost_image if result.cost_credits else 0
+    if koszt_zdjecia and credits.credits_enabled(conn, tenant_id) and credits.get_balance(conn, tenant_id) < koszt_zdjecia:
         jobs.hold(conn, job["id"], "brak kredytow")
         conn.commit()
         return
@@ -166,8 +188,8 @@ def run_image_job(conn, job: dict, shop_prompt_image: str, openai_key: str,
                    result_patch={"output_path": str(out_path), "orig_name": orig,
                                  "size_kb": round(len(result.output_bytes) / 1024),
                                  "_preview": result.preview_mode})
-    if result.cost_credits:
-        credits.charge(conn, tenant_id, result.cost_credits, "charge:image", job["id"])
+    if koszt_zdjecia:
+        credits.charge(conn, tenant_id, koszt_zdjecia, "charge:image", job["id"])
     jobs.complete(conn, job["id"])
     conn.commit()
 
@@ -176,12 +198,40 @@ def run_image_job(conn, job: dict, shop_prompt_image: str, openai_key: str,
 # Tworzenie produktu ze zdjec (Etap 2)
 # ---------------------------------------------------------------------------
 
+def _bez_nawiasow(nazwa: str) -> str:
+    """Usuwa dopiski w nawiasach kwadratowych z nazwy kategorii.
+
+    Konwencja z workflow n8n: 'Bransoletka CM miedz pozlacana 14k [ 17+3 cm ]'
+    -> 'Bransoletka CM miedz pozlacana 14k'. Nawias to notatka o rozmiarze
+    czy wariancie, nie czesc nazwy kategorii.
+    """
+    import re as _re
+    return " ".join(_re.sub(r"\[[^\]]*\]", " ", nazwa or "").split())
+
+
 def resolve_category(conn, shop_id: int, source_name: str) -> int | None:
+    """Kategoria z mapy: dokladna nazwa, a gdy brak - najdluzszy pasujacy poczatek.
+
+    Najpierw wycinamy dopiski w nawiasach. Najdluzszy poczatek wygrywa, wiec
+    'Kolczyki Xuping Stal 316L' ma pierwszenstwo przed ogolnym 'Kolczyki'.
+    Gdy nic nie pasuje - zwracamy None i zadanie zostaje wstrzymane, zamiast
+    wrzucac produkt do przypadkowej kategorii.
+    """
+    czysta = _bez_nawiasow(source_name)
+
     row = conn.execute(
         "SELECT ps_category_id FROM category_map "
         "WHERE shop_id=%s AND lower(btrim(source_name))=lower(btrim(%s))",
-        (shop_id, source_name),
-    ).fetchone()
+        (shop_id, czysta)).fetchone()
+    if row:
+        return row["ps_category_id"]
+
+    row = conn.execute(
+        "SELECT ps_category_id FROM category_map "
+        "WHERE shop_id=%s "
+        "  AND lower(btrim(%s)) LIKE lower(btrim(source_name)) || '%%' "
+        "ORDER BY length(btrim(source_name)) DESC LIMIT 1",
+        (shop_id, czysta)).fetchone()
     return row["ps_category_id"] if row else None
 
 
@@ -232,7 +282,7 @@ def run_product_job(conn, job: dict, shop: dict, auth_key: str, openai_key: str,
             dst = out_dir / output_filename(photo["orig_name"])
             dst.write_bytes(res.output_bytes)
             processed.append({"path": str(dst), "index": photo["index"]})
-            total_cost += res.cost_credits
+            total_cost += (terms.load(conn, tenant_id).cost_image if res.cost_credits else 0)
             preview = preview or res.preview_mode
 
         if total_cost and credits.credits_enabled(conn, tenant_id) and credits.get_balance(conn, tenant_id) < total_cost:

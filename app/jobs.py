@@ -10,11 +10,12 @@ import json
 
 
 def enqueue(conn, tenant_id: int, shop_id: int | None, product_ref: str | None,
-            job_type: str = "description", payload: dict | None = None) -> int:
+            job_type: str = "description", payload: dict | None = None,
+            batch_id: int | None = None) -> int:
     row = conn.execute(
-        "INSERT INTO jobs (tenant_id, shop_id, type, product_ref, payload) "
-        "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-        (tenant_id, shop_id, job_type, product_ref, json.dumps(payload or {})),
+        "INSERT INTO jobs (tenant_id, shop_id, type, product_ref, payload, batch_id) "
+        "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+        (tenant_id, shop_id, job_type, product_ref, json.dumps(payload or {}), batch_id),
     ).fetchone()
     return row["id"]
 
