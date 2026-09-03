@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import auth, credits, db, terms, batches
+from app import auth, credits, db, terms, batches, trial
 from app.url_guard import validate_shop_url, UnsafeURL
 from app.config import Settings
 from app.crypto import encrypt
@@ -141,7 +141,8 @@ def dashboard(request: Request):
 # --- edycja sklepu (prompt + ustawienia) -------------------------------------
 
 @app.get("/shop/{shop_id}", response_class=HTMLResponse)
-def shop_form(request: Request, shop_id: int, saved: int = 0, error: str | None = None):
+def shop_form(request: Request, shop_id: int, saved: int = 0,
+              msg: str | None = None, error: str | None = None):
     with db.connection() as conn:
         user = _current_user(request, conn)
         if not user:
@@ -153,7 +154,7 @@ def shop_form(request: Request, shop_id: int, saved: int = 0, error: str | None 
     csrf = auth.ensure_csrf_token(request.session)
     return templates.TemplateResponse("shop.html", {
         "request": request, "user": user, "shop": shop, "csrf": csrf,
-        "balance": balance, "saved": saved, "error": error,
+        "balance": balance, "saved": saved, "msg": msg, "error": error,
         "params_json": json.dumps(shop["params"], ensure_ascii=False, indent=2),
     })
 
@@ -236,7 +237,19 @@ def shop_save(request: Request, shop_id: int,
                 "UPDATE shops SET auth_key_encrypted = %s WHERE id = %s",
                 (encrypt(new_auth_key.strip(), settings.fernet_key), shop_id),
             )
+
+        # Darmowe kredyty na test - przy pierwszym podlaczeniu sklepu.
+        # Limit per domena sklepu, wiec zalozenie kolejnych kont nic nie da.
+        przyznano, info = 0, ""
+        if not user.get("is_owner_account"):
+            przyznano, info = trial.przyznaj_jesli_mozna(conn, user["tenant_id"], base_url)
         conn.commit()
+
+    if info:
+        from urllib.parse import quote
+        klucz = "msg" if przyznano else "error"
+        return RedirectResponse(f"/shop/{shop_id}?saved=1&{klucz}={quote(info)}",
+                                status_code=303)
     return RedirectResponse(f"/shop/{shop_id}?saved=1", status_code=303)
 
 
@@ -252,6 +265,9 @@ from fastapi.responses import FileResponse
 from app import jobs as _jobs
 
 _ALLOWED_EXT = {".jpg", ".jpeg", ".png"}
+# Zdjecia i tak zmniejszamy do 1536 px przed wyslaniem do modelu, wiec
+# wieksze pliki niczego nie poprawiaja - tylko zajmuja dysk i pasmo.
+_MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_MB", "12") or 12) * 1024 * 1024
 
 
 @app.get("/images", response_class=HTMLResponse)
@@ -287,14 +303,22 @@ async def images_upload(request: Request, files: list[UploadFile] = File(...),
         incoming.mkdir(parents=True, exist_ok=True)
 
         accepted, rejected, batch_id = 0, 0, None
+        errors_img: list[str] = []
         for f in files:
             ext = _Path(f.filename or "").suffix.lower()
             if ext not in _ALLOWED_EXT:
                 rejected += 1
                 continue
             dest = incoming / f"{_uuid.uuid4().hex}{ext}"
+            dane = await f.read()
+            if len(dane) > _MAX_UPLOAD_BYTES:
+                errors_img.append(f"{f.filename}: plik ma "
+                                  f"{len(dane)/1024/1024:.1f} MB (limit "
+                                  f"{_MAX_UPLOAD_BYTES/1024/1024:.0f} MB)")
+                rejected += 1
+                continue
             try:
-                dest.write_bytes(await f.read())
+                dest.write_bytes(dane)
             except OSError as e:
                 return RedirectResponse(
                     f"/images?error=Brak+dostepu+do+katalogu+danych+({type(e).__name__})."
@@ -302,7 +326,7 @@ async def images_upload(request: Request, files: list[UploadFile] = File(...),
             if batch_id is None:
                 batch_id = batches.create(conn, user["tenant_id"], user, "image", len(files))
             _jobs.enqueue(conn, user["tenant_id"], shop_id=None, product_ref=f.filename,
-                          job_type="image", batch_id=batch_id,
+                          job_type="image", batch_id=batch_id, created_by=user["id"],
                           payload={"input_path": str(dest), "orig_name": f.filename})
             accepted += 1
         if batch_id and accepted != len(files):
@@ -310,10 +334,15 @@ async def images_upload(request: Request, files: list[UploadFile] = File(...),
             conn.execute("UPDATE batches SET total = %s WHERE id = %s", (accepted, batch_id))
         conn.commit()
 
-    msg = f"Przyjeto+{accepted}+zdjec"
+    from urllib.parse import quote
+    url = f"/images?msg={quote(f'Przyjeto {accepted} zdjec')}"
     if rejected:
-        msg += f",+odrzucono+{rejected}+(zly+format)"
-    return RedirectResponse(f"/images?msg={msg}", status_code=303)
+        # szczegoly odrzuconych plikow - zeby bylo wiadomo, co poprawic
+        detale = " | ".join(errors_img[:10]) if errors_img else "zly format"
+        if len(errors_img) > 10:
+            detale += f" | ... (+{len(errors_img) - 10} wiecej)"
+        url += f"&error={quote(f'Odrzucono {rejected}: {detale}')}"
+    return RedirectResponse(url, status_code=303)
 
 
 @app.get("/images/file/{job_id}")
@@ -401,7 +430,7 @@ def generate_scan(request: Request, shop_id: int = Form(...), mode: str = Form(.
 
         batch_id = batches.create(conn, user["tenant_id"], user, "description", len(new_ids))
         for pid in new_ids:
-            _jobs.enqueue(conn, user["tenant_id"], shop["id"], product_ref=str(pid), batch_id=batch_id,
+            _jobs.enqueue(conn, user["tenant_id"], shop["id"], product_ref=str(pid), batch_id=batch_id, created_by=user["id"],
                           job_type="description", payload={"product_id": pid})
         conn.commit()
 
@@ -568,7 +597,7 @@ async def products_upload(request: Request, shop_id: int = Form(...),
             photos = [{"path": paths[(i.orig_name, i.photo_index)],
                        "orig_name": i.orig_name, "index": i.photo_index} for i in items]
             first = items[0]
-            _jobs.enqueue(conn, user["tenant_id"], shop["id"], product_ref=symbol, batch_id=batch_id,
+            _jobs.enqueue(conn, user["tenant_id"], shop["id"], product_ref=symbol, batch_id=batch_id, created_by=user["id"],
                           job_type="product",
                           payload={"symbol": symbol, "category": first.category,
                                    "price_gross": str(first.price_gross),
@@ -672,10 +701,15 @@ def admin_users(request: Request, msg: str | None = None, error: str | None = No
             "FROM tenants t LEFT JOIN tenant_credits c ON c.tenant_id = t.id "
             "ORDER BY t.id").fetchall()
 
+        testy = conn.execute(
+            "SELECT g.id, g.domain, g.credits, g.granted_at, t.name AS klient "
+            "FROM trial_grants g LEFT JOIN tenants t ON t.id = g.tenant_id "
+            "ORDER BY g.granted_at DESC LIMIT 50").fetchall()
+
     csrf = auth.ensure_csrf_token(request.session)
     return templates.TemplateResponse("admin_users.html", {
         "request": request, "user": admin, "users": users, "tenants": tenants,
-        "csrf": csrf, "msg": msg, "error": error,
+        "testy": testy, "csrf": csrf, "msg": msg, "error": error,
     })
 
 
@@ -1155,3 +1189,94 @@ def api_postep(request: Request):
         "bledy": r["bledy"], "w_toku": r["w_toku"],
         "procent": round((r["gotowe"] + r["bledy"]) * 100 / max(r["wszystkie"], 1)),
     } for r in wiersze]})
+
+
+@app.post("/admin/trial/{grant_id}/reset")
+def admin_trial_reset(request: Request, grant_id: int, csrf_token: str = Form(...)):
+    """Zwalnia domene - klient moze dostac darmowe kredyty ponownie."""
+    from urllib.parse import quote
+    with db.connection() as conn:
+        admin = _require_superadmin(request, conn)
+        if not admin:
+            return RedirectResponse("/", status_code=303)
+        if not auth.check_csrf(request.session, csrf_token):
+            return RedirectResponse("/admin?error=Sesja+wygasla", status_code=303)
+        r = conn.execute("DELETE FROM trial_grants WHERE id = %s RETURNING domain, tenant_id",
+                         (grant_id,)).fetchone()
+        if r and r["tenant_id"]:
+            conn.execute("UPDATE tenants SET trial_granted = false WHERE id = %s",
+                         (r["tenant_id"],))
+        conn.commit()
+    return RedirectResponse(
+        f"/admin?msg={quote('Zwolniono domene ' + (r['domain'] if r else ''))}",
+        status_code=303)
+
+
+@app.get("/admin/zuzycie")
+def admin_zuzycie(request: Request, dni: int = 30):
+    """Raport zuzycia: kredyty i tokeny per klient oraz per uzytkownik."""
+    with db.connection() as conn:
+        admin = _require_superadmin(request, conn)
+        if not admin:
+            return RedirectResponse("/", status_code=303)
+        dni = max(1, min(dni, 365))
+
+        klienci = conn.execute(
+            "SELECT t.id, t.name, "
+            "  coalesce(sum(u.credits), 0) AS kredyty, "
+            "  coalesce(sum(u.input_tokens) FILTER (WHERE u.kind='description'), 0) AS tok_we, "
+            "  coalesce(sum(u.output_tokens) FILTER (WHERE u.kind='description'), 0) AS tok_wy, "
+            "  coalesce(sum(u.input_tokens) FILTER (WHERE u.kind='image'), 0) AS obr_we, "
+            "  coalesce(sum(u.output_tokens) FILTER (WHERE u.kind='image'), 0) AS obr_wy, "
+            "  count(u.*) FILTER (WHERE u.kind = 'description') AS opisy, "
+            "  count(u.*) FILTER (WHERE u.kind = 'image') AS zdjecia, "
+            "  coalesce(c.balance, 0) AS saldo "
+            "FROM tenants t "
+            "LEFT JOIN ai_usage u ON u.tenant_id = t.id "
+            f"  AND u.created_at > now() - interval '{dni} days' "
+            "LEFT JOIN tenant_credits c ON c.tenant_id = t.id "
+            "GROUP BY t.id, t.name, c.balance ORDER BY kredyty DESC, t.id").fetchall()
+
+        uzytkownicy = conn.execute(
+            "SELECT us.email, t.name AS klient, "
+            "  coalesce(sum(u.credits), 0) AS kredyty, "
+            "  coalesce(sum(u.input_tokens + u.output_tokens), 0) AS tokeny, "
+            "  count(u.*) AS operacje "
+            "FROM ai_usage u "
+            "JOIN tenants t ON t.id = u.tenant_id "
+            "LEFT JOIN users us ON us.id = u.user_id "
+            f"WHERE u.created_at > now() - interval '{dni} days' "
+            "GROUP BY us.email, t.name ORDER BY kredyty DESC LIMIT 50").fetchall()
+
+        suma = conn.execute(
+            "SELECT coalesce(sum(credits),0) AS kredyty, "
+            "  coalesce(sum(input_tokens) FILTER (WHERE kind='description'),0) AS tok_we, "
+            "  coalesce(sum(output_tokens) FILTER (WHERE kind='description'),0) AS tok_wy, "
+            "  coalesce(sum(input_tokens) FILTER (WHERE kind='image'),0) AS obr_we, "
+            "  coalesce(sum(output_tokens) FILTER (WHERE kind='image'),0) AS obr_wy, "
+            "  count(*) AS operacje "
+            f"FROM ai_usage WHERE created_at > now() - interval '{dni} days'").fetchone()
+
+    from app.koszty import koszt_pln, opis_stawek
+
+    def _rozbij(r) -> dict:
+        """Koszt osobno dla Claude (opisy) i OpenAI (zdjecia)."""
+        claude = koszt_pln(r["tok_we"], r["tok_wy"])
+        # gdy API nie podalo tokenow dla zdjec, liczymy ryczaltem po sztukach
+        bez_pomiaru = (r["zdjecia"] or 0) if not (r["obr_we"] or r["obr_wy"]) else 0
+        openai_ = koszt_pln(0, 0, bez_pomiaru, r["obr_we"], r["obr_wy"])
+        return {"pln_claude": claude, "pln_openai": openai_,
+                "pln": round(claude + openai_, 4)}
+
+    klienci = [dict(k) | _rozbij(k) for k in klienci]
+    suma_koszt = _rozbij({
+        "tok_we": suma["tok_we"], "tok_wy": suma["tok_wy"],
+        "obr_we": suma["obr_we"], "obr_wy": suma["obr_wy"],
+        "zdjecia": sum(k["zdjecia"] or 0 for k in klienci)})
+    suma_pln = suma_koszt["pln"]
+
+    return templates.TemplateResponse("admin_zuzycie.html", {
+        "request": request, "user": admin, "klienci": klienci,
+        "uzytkownicy": uzytkownicy, "suma": suma, "dni": dni,
+        "suma_pln": suma_pln, "suma_koszt": suma_koszt, "stawki": opis_stawek(),
+    })

@@ -7,6 +7,7 @@ Zachowane z oryginalu:
 - wymuszenie RGB (naprawa CMYK/palety),
 - kanwa 1500x1500 + UnsharpMask + petla JPEG do <=300KB.
 """
+import os
 from io import BytesIO
 
 from PIL import Image, ImageFilter, ImageOps, UnidentifiedImageError
@@ -16,8 +17,15 @@ class ImageInputError(ValueError):
     pass
 
 
+# Maksymalny bok zdjecia wysylanego do modelu obrazowego.
+# gpt-image-2 liczy tokeny wejsciowe od rozmiaru obrazu, wiec zdjecie 4K
+# z telefonu kosztuje wielokrotnie wiecej niz zmniejszone - a wynik jest
+# taki sam, bo i tak generujemy 1536x1536.
+MAX_INPUT_SIDE = int(os.environ.get("MAX_INPUT_IMAGE_SIDE", "1536") or 1536)
+
+
 def normalize_input_image(data: bytes) -> BytesIO:
-    """Czysci zdjecie wejsciowe przed wyslaniem do modelu. Zwraca bufor PNG."""
+    """Czysci i ZMNIEJSZA zdjecie przed wyslaniem do modelu. Zwraca bufor PNG."""
     size_kb = len(data) / 1024
     if size_kb < 5:
         raise ImageInputError(
@@ -32,6 +40,10 @@ def normalize_input_image(data: bytes) -> BytesIO:
     img = ImageOps.exif_transpose(img)
     if img.mode != "RGB":
         img = img.convert("RGB")
+
+    # ograniczenie kosztu: wieksze zdjecia zmniejszamy przed wyslaniem
+    if max(img.size) > MAX_INPUT_SIDE:
+        img.thumbnail((MAX_INPUT_SIDE, MAX_INPUT_SIDE), Image.Resampling.LANCZOS)
 
     buffer = BytesIO()
     img.save(buffer, format="PNG")

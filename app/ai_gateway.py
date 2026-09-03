@@ -238,6 +238,7 @@ class ImageResult:
     output_bytes: bytes
     cost_credits: int
     preview_mode: bool = False
+    usage: dict = field(default_factory=dict)
 
 
 # --- tempo wywolan obrazowych -------------------------------------------------
@@ -279,11 +280,25 @@ def process_image(data: bytes, prompt: str, openai_key: str) -> ImageResult:
         try:
             _pace_image_call()
             normalized.seek(0)
-            result = client.images.edit(model=IMAGE_MODEL, image=normalized,
-                                        prompt=prompt, size="1536x1536")
-            image_bytes = base64.b64decode(result.data[0].b64_json)
+            # Czytamy SUROWA odpowiedz, bo biblioteka openai 1.57 nie mapuje
+            # pola 'usage' przy obrazach - a API je zwraca. Dzieki temu koszt
+            # obrobki liczymy z pomiaru, nie z ryczaltu.
+            surowa = client.images.with_raw_response.edit(
+                model=IMAGE_MODEL, image=normalized, prompt=prompt, size="1536x1536")
+            dane = json.loads(surowa.text)
+            image_bytes = base64.b64decode(dane["data"][0]["b64_json"])
+
+            zuzycie = {}
+            u = dane.get("usage") or {}
+            if u:
+                zuzycie["input_tokens"] = int(u.get("input_tokens") or 0)
+                zuzycie["output_tokens"] = int(u.get("output_tokens") or 0)
+                szcz = u.get("input_tokens_details") or {}
+                zuzycie["image_tokens"] = int(szcz.get("image_tokens") or 0)
+                zuzycie["text_tokens"] = int(szcz.get("text_tokens") or 0)
+
             return ImageResult(optimize_for_web(image_bytes),
-                               cost_credits=CREDITS_PER_IMAGE)
+                               cost_credits=CREDITS_PER_IMAGE, usage=zuzycie)
         except Exception as e:
             last_error = e
             if _is_rate_limit(e) and attempt < 2:

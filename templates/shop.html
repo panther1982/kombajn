@@ -10,6 +10,7 @@
 </div>
 
 {% if saved %}<div class="flash ok">Zapisano zmiany.</div>{% endif %}
+{% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
 {% if error %}<div class="flash err">{{ error }}</div>{% endif %}
 
 <form method="post" action="/shop/{{ shop.id }}">

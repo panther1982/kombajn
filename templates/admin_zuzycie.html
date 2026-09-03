@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Zużycie — Kombajn{% endblock %}
+{% block content %}
+<h1>Zużycie</h1>
+<p class="sub">Kredyty i tokeny AI z ostatnich {{ dni }} dni.</p>
+
+<div class="row" style="margin-bottom:18px">
+  {% for d in [7, 30, 90, 365] %}
+  <a class="btn ghost" href="/admin/zuzycie?dni={{ d }}"
+     {% if d == dni %}style="border-color:var(--accent);color:var(--accent)"{% endif %}>
+    {{ d }} dni</a>
+  {% endfor %}
+</div>
+
+<div class="tiles">
+  <div class="tile">
+    <div class="val">{{ suma.kredyty }}</div><div class="lbl">Kredytów zużyto</div>
+  </div>
+  <div class="tile">
+    <div class="val">{{ suma.operacje }}</div><div class="lbl">Operacji</div>
+  </div>
+  <div class="tile">
+    <div class="ico w">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+    </div>
+    <div class="val">{{ '%.2f'|format(suma_pln) }} zł</div>
+    <div class="lbl">Koszt AI razem</div>
+  </div>
+  <div class="tile">
+    <div class="val">{{ '%.2f'|format(suma_koszt.pln_claude) }} zł</div>
+    <div class="lbl">Claude — opisy</div>
+  </div>
+  <div class="tile">
+    <div class="val">{{ '%.2f'|format(suma_koszt.pln_openai) }} zł</div>
+    <div class="lbl">OpenAI — zdjęcia</div>
+  </div>
+  <div class="tile">
+    <div class="val">{{ '{:,}'.format(suma.tok_we).replace(',', ' ') }}</div>
+    <div class="lbl">Tokenów wejściowych</div>
+  </div>
+  <div class="tile">
+    <div class="val">{{ '{:,}'.format(suma.tok_wy).replace(',', ' ') }}</div>
+    <div class="lbl">Tokenów wyjściowych</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Wg klienta</h2>
+  <table>
+    <thead><tr style="border-bottom:1px solid var(--line-2)">
+      <th style="padding:8px 0">Klient</th>
+      <th style="padding:8px 0">Opisy</th>
+      <th style="padding:8px 0">Zdjęcia</th>
+      <th style="padding:8px 0">Kredyty</th>
+      <th style="padding:8px 0">Tokeny</th>
+      <th style="padding:8px 0">Claude</th>
+      <th style="padding:8px 0">OpenAI</th>
+      <th style="padding:8px 0">Razem</th>
+      <th style="padding:8px 0;text-align:right">Saldo</th>
+    </tr></thead>
+    <tbody>
+      {% for k in klienci %}
+      <tr style="border-top:1px solid var(--line-2)">
+        <td style="padding:9px 0;font-weight:500">{{ k.name }}</td>
+        <td style="padding:9px 0;color:var(--ink-2)">{{ k.opisy }}</td>
+        <td style="padding:9px 0;color:var(--ink-2)">{{ k.zdjecia }}</td>
+        <td style="padding:9px 0">{{ k.kredyty }}</td>
+        <td style="padding:9px 0;color:var(--ink-2)">
+          {{ '{:,}'.format(k.tok_we + k.tok_wy + k.obr_we + k.obr_wy).replace(',', ' ') }}</td>
+        <td style="padding:9px 0;color:var(--ink-2)">{{ '%.2f'|format(k.pln_claude) }} zł</td>
+        <td style="padding:9px 0;color:var(--ink-2)">{{ '%.2f'|format(k.pln_openai) }} zł</td>
+        <td style="padding:9px 0;font-weight:500">{{ '%.2f'|format(k.pln) }} zł</td>
+        <td style="padding:9px 0;text-align:right">{{ k.saldo }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if uzytkownicy %}
+<div class="card">
+  <h2>Wg użytkownika</h2>
+  <table>
+    <thead><tr style="border-bottom:1px solid var(--line-2)">
+      <th style="padding:8px 0">Konto</th>
+      <th style="padding:8px 0">Klient</th>
+      <th style="padding:8px 0">Operacje</th>
+      <th style="padding:8px 0">Kredyty</th>
+      <th style="padding:8px 0;text-align:right">Tokeny</th>
+    </tr></thead>
+    <tbody>
+      {% for u in uzytkownicy %}
+      <tr style="border-top:1px solid var(--line-2)">
+        <td style="padding:9px 0">{{ u.email or 'konto usunięte' }}</td>
+        <td style="padding:9px 0;color:var(--ink-2)">{{ u.klient }}</td>
+        <td style="padding:9px 0">{{ u.operacje }}</td>
+        <td style="padding:9px 0">{{ u.kredyty }}</td>
+        <td style="padding:9px 0;text-align:right;color:var(--ink-2)">
+          {{ '{:,}'.format(u.tokeny).replace(',', ' ') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<p class="sub" style="font-size:12.5px">
+  „Koszt AI” to <strong>Twój</strong> koszt u dostawców, nie cena dla klienta.
+  Stawki: {{ stawki }} — zmienisz je w pliku <code>.env</code>
+  (PRICE_CLAUDE_IN_USD_MTOK, PRICE_CLAUDE_OUT_USD_MTOK, PRICE_IMAGE_USD, USD_PLN).
+  Sprawdź aktualne cenniki u dostawców, bo się zmieniają.
+  Zdjęcia rozliczamy po tokenach zwróconych przez API — gdy ich nie ma
+  (starsze operacje), liczymy ryczałtem od sztuki. Obróbka zdjęć rozliczana jest
+  w kredytach. Dane zapisujemy od wdrożenia tej funkcji — wcześniejsze operacje nie są ujęte.
+</p>
+{% endblock %}

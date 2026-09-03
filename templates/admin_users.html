@@ -145,6 +145,31 @@
   </form>
 </details>
 
+<div class="card">
+  <h2>Darmowe testy (per domena sklepu)</h2>
+  <p class="sub" style="margin:0 0 12px">
+    Kredyty na test przyznajemy raz na domenę sklepu — zakładanie kolejnych kont
+    e-mail nic nie daje. Poddomeny (sklep., test.) liczą się jako ta sama firma.
+  </p>
+  {% if testy %}
+    {% for g in testy %}
+    <div class="shop-item">
+      <div style="min-width:0">
+        <div style="font-weight:500">{{ g.domain }}</div>
+        <div class="hint">{{ g.klient or 'klient usunięty' }} · {{ g.credits }} kredytów ·
+          {{ g.granted_at.strftime('%Y-%m-%d %H:%M') if g.granted_at else '' }}</div>
+      </div>
+      <form method="post" action="/admin/trial/{{ g.id }}/reset" style="margin:0">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button class="btn ghost" type="submit">Zwolnij</button>
+      </form>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="sub" style="margin:0">Nikt jeszcze nie skorzystał z darmowego testu.</p>
+  {% endif %}
+</div>
+
 <div class="card" style="padding:0;overflow:hidden">
   <table style="width:100%;border-collapse:collapse;font-size:14px">
     <thead>

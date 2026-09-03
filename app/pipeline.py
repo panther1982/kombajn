@@ -144,6 +144,14 @@ def run_description_job(conn, job: dict, shop: dict, auth_key: str,
                 jobs.fail(conn, job["id"], f"UWAGA - zapis zmienil pola krytyczne: {opis}")
                 conn.commit()
                 return
+            # zapis zuzycia AI - do raportu i rozliczen (tokeny + kredyty)
+            _u = getattr(gen, "usage", None) or {}
+            conn.execute(
+                "INSERT INTO ai_usage (tenant_id, user_id, job_id, kind, "
+                "  input_tokens, output_tokens, credits) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (tenant_id, job.get("created_by"), job["id"], "description",
+                 int(_u.get("input_tokens") or 0), int(_u.get("output_tokens") or 0), cost))
+
             if cost:
                 credits.charge(conn, tenant_id, cost, "charge:description", job["id"])
             jobs.complete(conn, job["id"])
@@ -188,6 +196,13 @@ def run_image_job(conn, job: dict, shop_prompt_image: str, openai_key: str,
                    result_patch={"output_path": str(out_path), "orig_name": orig,
                                  "size_kb": round(len(result.output_bytes) / 1024),
                                  "_preview": result.preview_mode})
+    _ui = getattr(result, "usage", None) or {}
+    conn.execute(
+        "INSERT INTO ai_usage (tenant_id, user_id, job_id, kind, "
+        "  input_tokens, output_tokens, credits) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+        (tenant_id, job.get("created_by"), job["id"], "image",
+         int(_ui.get("input_tokens") or 0), int(_ui.get("output_tokens") or 0),
+         koszt_zdjecia))
     if koszt_zdjecia:
         credits.charge(conn, tenant_id, koszt_zdjecia, "charge:image", job["id"])
     jobs.complete(conn, job["id"])
