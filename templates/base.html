@@ -148,6 +148,18 @@
     table{width:100%;border-collapse:collapse;font-size:13px}
     th{font-weight:500;color:var(--ink-2);font-size:12px;text-align:left}
 
+    /* ---------- pasek postepu trwajacych partii ---------- */
+    #postep{margin-bottom:16px;display:none}
+    .pp{background:var(--card);border:1px solid var(--line-2);border-radius:var(--r-card);
+      padding:14px 16px;margin-bottom:10px;box-shadow:var(--shadow)}
+    .pp-top{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:9px}
+    .pp-nazwa{font-size:13.5px;font-weight:500}
+    .pp-licz{font-size:12.5px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+    .pp-tor{height:7px;background:var(--bg);border-radius:99px;overflow:hidden}
+    .pp-wyp{height:100%;background:var(--accent);border-radius:99px;width:0;
+      transition:width .4s ease}
+    .pp-blad{color:var(--danger)}
+
     @media (prefers-reduced-motion:reduce){*{transition:none!important}}
     @media (max-width:820px){
       body{flex-direction:column}
@@ -221,7 +233,10 @@
         <button type="button" id="tDark" aria-pressed="false">Ciemny</button>
       </div>
     </header>
-    <main>{% block content %}{% endblock %}</main>
+    <main>
+      <div id="postep" aria-live="polite"></div>
+      {% block content %}{% endblock %}
+    </main>
     {% else %}
     <main style="max-width:390px;margin:9vh auto 0">{% block content_guest %}{% endblock %}</main>
     {% endif %}
@@ -248,6 +263,38 @@
         body.classList.toggle('nav-min');
         try{localStorage.setItem('kombajn-nav',body.classList.contains('nav-min')?'min':'full')}catch(e){}
       });
+      // --- pasek postepu: odpytujemy co 3 s, tylko gdy cos trwa ---
+      var box=document.getElementById('postep');
+      if(box){
+        var pusteOdpowiedzi=0;
+        function rysuj(partie){
+          if(!partie.length){box.style.display='none';box.innerHTML='';return;}
+          box.style.display='block';
+          box.innerHTML=partie.map(function(p){
+            var bledy=p.bledy?' · <span class="pp-blad">'+p.bledy+' z błędem</span>':'';
+            return '<div class="pp"><div class="pp-top">'+
+              '<span class="pp-nazwa">'+p.nazwa+'</span>'+
+              '<span class="pp-licz">'+(p.gotowe+p.bledy)+' z '+p.wszystkie+
+              ' · zostało '+p.w_toku+bledy+'</span></div>'+
+              '<div class="pp-tor"><div class="pp-wyp" style="width:'+p.procent+'%"></div></div></div>';
+          }).join('');
+        }
+        function sprawdz(){
+          fetch('/api/postep',{headers:{'Accept':'application/json'}})
+            .then(function(r){return r.ok?r.json():{partie:[]}})
+            .then(function(d){
+              rysuj(d.partie||[]);
+              // gdy nic nie trwa przez dluzszy czas, odpytujemy rzadziej
+              pusteOdpowiedzi=(d.partie&&d.partie.length)?0:pusteOdpowiedzi+1;
+            })
+            .catch(function(){});
+        }
+        sprawdz();
+        setInterval(function(){
+          if(pusteOdpowiedzi<10||pusteOdpowiedzi%5===0)sprawdz();
+        },3000);
+      }
+
       var d=document.getElementById('today');
       if(d)d.textContent=new Date().toLocaleDateString('pl-PL',
         {weekday:'long',year:'numeric',month:'long',day:'numeric'});

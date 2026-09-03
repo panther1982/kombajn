@@ -1122,3 +1122,36 @@ def categories_sync_apply(request: Request, shop_id: int,
     return RedirectResponse(
         f"/categories/sync/{shop_id}?msg={quote(f'Dodano {dodane} pozycji do mapy')}",
         status_code=303)
+
+
+@app.get("/api/postep")
+def api_postep(request: Request):
+    """Stan trwajacych partii zalogowanego uzytkownika (dla paska postepu)."""
+    from fastapi.responses import JSONResponse
+    with db.connection() as conn:
+        user = _current_user(request, conn)
+        if not user:
+            return JSONResponse({"partie": []}, status_code=401)
+
+        wiersze = conn.execute(
+            "SELECT b.id, b.kind, "
+            "  count(j.*) AS wszystkie, "
+            "  count(j.*) FILTER (WHERE j.status = 'done') AS gotowe, "
+            "  count(j.*) FILTER (WHERE j.status IN ('failed','held')) AS bledy, "
+            "  count(j.*) FILTER (WHERE j.status IN ('pending','running')) AS w_toku "
+            "FROM batches b JOIN jobs j ON j.batch_id = b.id "
+            "WHERE b.tenant_id = %s AND b.created_at > now() - interval '6 hours' "
+            "GROUP BY b.id, b.kind "
+            "HAVING count(j.*) FILTER (WHERE j.status IN ('pending','running')) > 0 "
+            "ORDER BY b.id DESC LIMIT 5",
+            (user["tenant_id"],)).fetchall()
+
+    etykiety = {"product": "Tworzenie produktów", "image": "Obróbka zdjęć",
+                "description": "Generowanie opisów"}
+    return JSONResponse({"partie": [{
+        "id": r["id"],
+        "nazwa": etykiety.get(r["kind"], r["kind"]),
+        "wszystkie": r["wszystkie"], "gotowe": r["gotowe"],
+        "bledy": r["bledy"], "w_toku": r["w_toku"],
+        "procent": round((r["gotowe"] + r["bledy"]) * 100 / max(r["wszystkie"], 1)),
+    } for r in wiersze]})
