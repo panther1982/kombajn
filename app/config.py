@@ -1,5 +1,6 @@
 """Konfiguracja czytana ze zmiennych srodowiskowych (.env)."""
 import os
+import socket
 from dataclasses import dataclass
 
 
@@ -13,15 +14,22 @@ class Settings:
     lock_timeout_seconds: int
     data_dir: str              # skladowanie zdjec (wolumen)
     write_enabled: bool        # bezpiecznik: czy wolno pisac do sklepu
+    worker_types: tuple[str, ...] = ()   # puste = ten worker bierze wszystko
 
     @staticmethod
     def load() -> "Settings":
+        # Przy kilku kontenerach kazdy musi miec WLASNY identyfikator,
+        # inaczej w kolumnie locked_by nie widac, kto co przetwarza.
+        wid = os.environ.get("WORKER_ID") or f"worker-{socket.gethostname()}"
+        typy = tuple(t.strip() for t in os.environ.get("WORKER_TYPES", "").split(",")
+                     if t.strip())
         return Settings(
+            worker_types=typy,
             database_url=os.environ["DATABASE_URL"],
             fernet_key=os.environ["FERNET_KEY"],
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
             openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
-            worker_id=os.environ.get("WORKER_ID", "worker-1"),
+            worker_id=wid,
             lock_timeout_seconds=int(os.environ.get("LOCK_TIMEOUT_SECONDS", "600")),
             data_dir=os.environ.get("DATA_DIR", "/data"),
             write_enabled=os.environ.get("WRITE_ENABLED", "0") == "1",

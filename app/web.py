@@ -1172,7 +1172,8 @@ def api_postep(request: Request):
             "  count(j.*) AS wszystkie, "
             "  count(j.*) FILTER (WHERE j.status = 'done') AS gotowe, "
             "  count(j.*) FILTER (WHERE j.status IN ('failed','held')) AS bledy, "
-            "  count(j.*) FILTER (WHERE j.status IN ('pending','running')) AS w_toku "
+            "  count(j.*) FILTER (WHERE j.status IN ('pending','running')) AS w_toku, "
+            "  count(j.*) FILTER (WHERE j.status = 'running') AS pracuje "
             "FROM batches b JOIN jobs j ON j.batch_id = b.id "
             "WHERE b.tenant_id = %s AND b.created_at > now() - interval '6 hours' "
             "GROUP BY b.id, b.kind "
@@ -1186,7 +1187,7 @@ def api_postep(request: Request):
         "id": r["id"],
         "nazwa": etykiety.get(r["kind"], r["kind"]),
         "wszystkie": r["wszystkie"], "gotowe": r["gotowe"],
-        "bledy": r["bledy"], "w_toku": r["w_toku"],
+        "bledy": r["bledy"], "w_toku": r["w_toku"], "pracuje": r["pracuje"],
         "procent": round((r["gotowe"] + r["bledy"]) * 100 / max(r["wszystkie"], 1)),
     } for r in wiersze]})
 

@@ -280,10 +280,11 @@
           box.style.display='block';
           box.innerHTML=partie.map(function(p){
             var bledy=p.bledy?' · <span class="pp-blad">'+p.bledy+' z błędem</span>':'';
+            var rown=p.pracuje>1?' · '+p.pracuje+' naraz':'';
             return '<div class="pp"><div class="pp-top">'+
               '<span class="pp-nazwa">'+p.nazwa+'</span>'+
               '<span class="pp-licz">'+(p.gotowe+p.bledy)+' z '+p.wszystkie+
-              ' · zostało '+p.w_toku+bledy+
+              ' · zostało '+p.w_toku+rown+bledy+
               ' <button class="pp-stop" data-id="'+p.id+'">Zatrzymaj</button></span>'+
               '</div><div class="pp-tor"><div class="pp-wyp" style="width:'+p.procent+'%"></div></div></div>';
           }).join('');
