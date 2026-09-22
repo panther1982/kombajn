@@ -30,10 +30,42 @@ def status(conn, batch_id: int) -> dict:
     r = conn.execute(
         "SELECT count(*) AS wszystkie, "
         "  count(*) FILTER (WHERE status = 'done') AS gotowe, "
-        "  count(*) FILTER (WHERE status IN ('failed','held')) AS bledy, "
+        "  count(*) FILTER (WHERE status IN ('failed','held','cancelled')) AS bledy, "
         "  count(*) FILTER (WHERE status IN ('pending','running')) AS w_toku "
         "FROM jobs WHERE batch_id = %s", (batch_id,)).fetchone()
     return dict(r) if r else {"wszystkie": 0, "gotowe": 0, "bledy": 0, "w_toku": 0}
+
+
+def anulowana(conn, batch_id: int | None) -> bool:
+    """Czy partia zostala zatrzymana przez uzytkownika."""
+    if not batch_id:
+        return False
+    r = conn.execute("SELECT cancelled_at FROM batches WHERE id = %s",
+                     (batch_id,)).fetchone()
+    return bool(r and r["cancelled_at"])
+
+
+def anuluj(conn, batch_id: int, tenant_id: int) -> dict:
+    """Zatrzymuje partie: czekajace zadania oznacza jako anulowane.
+
+    Zadanie juz przetwarzane dokonczy sie (nie da sie bezpiecznie przerwac
+    wywolania w polowie), ale kolejne nie ruszy. Zwraca licznik.
+    """
+    r = conn.execute(
+        "UPDATE batches SET cancelled_at = now(), notified_at = coalesce(notified_at, now()) "
+        "WHERE id = %s AND tenant_id = %s AND cancelled_at IS NULL RETURNING id",
+        (batch_id, tenant_id)).fetchone()
+    if not r:
+        return {"zatrzymane": 0, "w_trakcie": 0}
+
+    zatrzymane = conn.execute(
+        "UPDATE jobs SET status = 'cancelled', updated_at = now() "
+        "WHERE batch_id = %s AND status = 'pending' RETURNING id",
+        (batch_id,)).fetchall()
+    w_trakcie = conn.execute(
+        "SELECT count(*) AS n FROM jobs WHERE batch_id = %s AND status = 'running'",
+        (batch_id,)).fetchone()
+    return {"zatrzymane": len(zatrzymane), "w_trakcie": w_trakcie["n"] if w_trakcie else 0}
 
 
 def maybe_notify(conn, batch_id: int | None) -> bool:

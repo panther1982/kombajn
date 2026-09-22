@@ -22,6 +22,10 @@ from app.templating import render_n8n_template
 
 CLAUDE_MODEL = "claude-sonnet-4-6"
 IMAGE_MODEL = "gpt-image-2"
+# Rozdzielczosc wyniku. To ONA napedza koszt: API liczy tokeny wejscia i
+# wyjscia wzgledem zadanego rozmiaru, a nie wielkosci wgranego pliku.
+# 1024x1024 jest ok. 2x tansze niz 1536x1536.
+IMAGE_SIZE = os.environ.get("IMAGE_OUTPUT_SIZE", "1536x1536").strip() or "1536x1536"
 
 CREDITS_PER_DESCRIPTION = 1
 CREDITS_PER_IMAGE = 3
@@ -284,7 +288,7 @@ def process_image(data: bytes, prompt: str, openai_key: str) -> ImageResult:
             # pola 'usage' przy obrazach - a API je zwraca. Dzieki temu koszt
             # obrobki liczymy z pomiaru, nie z ryczaltu.
             surowa = client.images.with_raw_response.edit(
-                model=IMAGE_MODEL, image=normalized, prompt=prompt, size="1536x1536")
+                model=IMAGE_MODEL, image=normalized, prompt=prompt, size=IMAGE_SIZE)
             dane = json.loads(surowa.text)
             image_bytes = base64.b64decode(dane["data"][0]["b64_json"])
 

@@ -29,6 +29,14 @@ def process_one(settings: Settings) -> bool:
         conn.commit()
         if job is None:
             return False
+        # Uzytkownik mogl zatrzymac partie juz po pobraniu zadania z kolejki.
+        # Sprawdzamy tuz przed praca, zeby nie placic za niepotrzebne wywolania.
+        if batches.anulowana(conn, job.get("batch_id")):
+            conn.execute("UPDATE jobs SET status='cancelled', updated_at=now() "
+                         "WHERE id=%s", (job["id"],))
+            conn.commit()
+            return True
+
         try:
             if job["type"] == "description":
                 shop = _load_shop(conn, job["shop_id"])

@@ -1280,3 +1280,16 @@ def admin_zuzycie(request: Request, dni: int = 30):
         "uzytkownicy": uzytkownicy, "suma": suma, "dni": dni,
         "suma_pln": suma_pln, "suma_koszt": suma_koszt, "stawki": opis_stawek(),
     })
+
+
+@app.post("/api/anuluj/{batch_id}")
+def api_anuluj(request: Request, batch_id: int):
+    """Zatrzymuje trwajaca partie (zadanie w trakcie dokonczy sie)."""
+    from fastapi.responses import JSONResponse
+    with db.connection() as conn:
+        user = _current_user(request, conn)
+        if not user:
+            return JSONResponse({"ok": False}, status_code=401)
+        wynik = batches.anuluj(conn, batch_id, user["tenant_id"])
+        conn.commit()
+    return JSONResponse({"ok": True, **wynik})
