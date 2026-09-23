@@ -254,21 +254,7 @@ _last_image_call = 0.0
 
 
 def _pace_image_call() -> None:
-    """Pilnuje odstepu miedzy wywolaniami obrazowymi.
-
-    Najpierw probuje tempa WSPOLNEGO (rezerwacja w bazie) — tylko ono dziala
-    poprawnie, gdy workerow jest kilka. Gdy baza niedostepna (skrypty, testy,
-    tryb podgladu), schodzimy do tempa lokalnego w tym procesie.
-    """
     global _last_image_call
-    try:
-        from app import tempo
-        tempo.zarezerwuj("openai_image", IMAGE_MIN_INTERVAL)
-        return
-    except Exception as e:  # noqa: BLE001
-        print(f"[tempo] rezerwacja w bazie nieudana ({type(e).__name__}: {e}); "
-              f"tempo lokalne", flush=True)
-
     with _image_lock:
         wait = IMAGE_MIN_INTERVAL - (time.monotonic() - _last_image_call)
         if wait > 0:

@@ -72,31 +72,3 @@ To osobny krok, świadomie odłożony:
 1. Wpięcie `prompt_opisy_produktow_v2.md` i modelu w `app/ai_gateway.py`.
 2. Potwierdzenie pól przy PUT w `app/prestashop.py` na sklepie testowym.
 3. Ustawienie przelicznika kredytów.
-
-## Wielozadaniowość (równoległe przetwarzanie)
-
-Dwie osobne pule workerów, żeby partia dwustu zdjęć nie blokowała opisów:
-
-| Pula           | Zadania              | Zmienna w `.env`  | Domyślnie |
-|----------------|----------------------|-------------------|-----------|
-| `worker`       | `description`        | `WORKER_OPISY`    | 3         |
-| `worker-media` | `image`, `product`   | `WORKER_ZDJECIA`  | 2         |
-
-Zmiana liczby bez przebudowy obrazu:
-
-    echo "WORKER_OPISY=5" >> .env
-    docker compose up -d
-
-Ile ma sens:
-- **Opisy** — przyspieszenie prawie liniowe. Limit to tempo Anthropic i moc VPS-a;
-  przy 2 vCPU rozsądny sufit to 4–6.
-- **Zdjęcia** — sufit narzuca OpenAI (~20 obrazów/min na cały klucz), a tempa pilnuje
-  wspólna rezerwacja w bazie (`app/tempo.py`, tabela `rate_slots`). Powyżej 2–3
-  kontenerów nic nie przyspieszy — workery będą tylko czekać na swój slot.
-  Po podniesieniu tieru w OpenAI zmniejsz `IMAGE_MIN_INTERVAL_SECONDS`.
-
-Kto co przetwarza:
-
-    docker compose ps
-    docker compose exec -T postgres psql -U kombajn -d kombajn \
-      -c "SELECT locked_by, type, count(*) FROM jobs WHERE status='running' GROUP BY 1,2"

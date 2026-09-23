@@ -17,36 +17,10 @@ services:
     # brak sekcji ports: baza jest dostepna TYLKO w sieci compose, nie z internetu
     restart: unless-stopped
 
-  # Pula OPISOW (Claude). Opisy nie maja twardego limitu tempa, wiec tu
-  # zrownoleglenie daje realne przyspieszenie prawie liniowe.
   worker:
     build: .
     command: python -m app.worker
     env_file: .env
-    environment:
-      WORKER_ID: ""                 # puste = identyfikator z nazwy kontenera
-      WORKER_TYPES: description
-    deploy:
-      replicas: ${WORKER_OPISY:-3}
-    volumes:
-      - kombajn_data:/data
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # Pula ZDJEC i PRODUKTOW (gpt-image-2). Wywolania obrazowe maja wspolny
-  # limit ~20/min na caly klucz, wiec tempo pilnuje rezerwacja w bazie
-  # (app/tempo.py). Wiecej niz 2-3 kontenery nie przyspiesza — tylko czeka.
-  worker-media:
-    build: .
-    command: python -m app.worker
-    env_file: .env
-    environment:
-      WORKER_ID: ""
-      WORKER_TYPES: image,product
-    deploy:
-      replicas: ${WORKER_ZDJECIA:-2}
     volumes:
       - kombajn_data:/data
     depends_on:

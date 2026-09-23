@@ -125,8 +125,7 @@ def test_full_product_creation():
         assert CALLS["created"]["reference"] == "MF25000"
         assert CALLS["created"]["name"] == "Kolczyki Xuping Stal 316L - MF25000", CALLS["created"]["name"]
         assert CALLS["created"]["category_id"] == 15
-        # nazwa zawiera "Xuping", wiec producent = Xuping (ID 3), nie domyslne Merebilo
-        assert CALLS["created"]["id_manufacturer"] == 3, CALLS["created"]["id_manufacturer"]
+        assert CALLS["created"]["id_manufacturer"] == 2  # brak marki -> Merebilo
         # kwirk PrestaShop: poprawka kategorii domyslnej po utworzeniu
         assert CALLS["fixed_category"] == (777, 15), CALLS.get("fixed_category")
         # wszystkie 3 zdjecia wgrane, w kolejnosci

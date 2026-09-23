@@ -25,8 +25,7 @@ def _tenant_image_prompt(conn, tenant_id: int) -> str:
 
 def process_one(settings: Settings) -> bool:
     with db.connection() as conn:
-        job = jobs.claim(conn, settings.worker_id, settings.lock_timeout_seconds,
-                         types=list(settings.worker_types) or None)
+        job = jobs.claim(conn, settings.worker_id, settings.lock_timeout_seconds)
         conn.commit()
         if job is None:
             return False
@@ -71,9 +70,7 @@ def process_one(settings: Settings) -> bool:
 def main() -> None:
     settings = Settings.load()
     db.init_pool(settings.database_url)
-    zakres = ",".join(settings.worker_types) if settings.worker_types else "wszystko"
-    print(f"[{settings.worker_id}] start (write_enabled={settings.write_enabled}, "
-          f"zadania={zakres})", flush=True)
+    print(f"[{settings.worker_id}] start (write_enabled={settings.write_enabled})")
     while True:
         if not process_one(settings):
             time.sleep(3)

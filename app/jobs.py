@@ -20,17 +20,10 @@ def enqueue(conn, tenant_id: int, shop_id: int | None, product_ref: str | None,
     return row["id"]
 
 
-def claim(conn, worker_id: str, lock_timeout_seconds: int,
-          types: list[str] | None = None) -> dict | None:
-    """Przejmij jedno zadanie. Zwraca wiersz joba albo None (pusta kolejka).
-
-    types  — ogranicza worker do wybranych rodzajow zadan. Dzieki temu
-             partia dwustu zdjec nie zablokuje kolejki opisow: opisy
-             obsluguje osobna pula workerow. None = bierz wszystko.
-    """
-    filtr_typu = "AND type = ANY(%(types)s)" if types else ""
+def claim(conn, worker_id: str, lock_timeout_seconds: int) -> dict | None:
+    """Przejmij jedno zadanie. Zwraca wiersz joba albo None (pusta kolejka)."""
     row = conn.execute(
-        f"""
+        """
         UPDATE jobs SET
             status    = 'running',
             locked_at = now(),
@@ -39,17 +32,16 @@ def claim(conn, worker_id: str, lock_timeout_seconds: int,
             updated_at = now()
         WHERE id = (
             SELECT id FROM jobs
-            WHERE (status = 'pending'
-                   OR (status = 'running'
-                       AND locked_at < now() - (%(timeout)s || ' seconds')::interval))
-              {filtr_typu}
+            WHERE status = 'pending'
+               OR (status = 'running'
+                   AND locked_at < now() - (%(timeout)s || ' seconds')::interval)
             ORDER BY created_at
             FOR UPDATE SKIP LOCKED
             LIMIT 1
         )
         RETURNING *
         """,
-        {"worker": worker_id, "timeout": lock_timeout_seconds, "types": types},
+        {"worker": worker_id, "timeout": lock_timeout_seconds},
     ).fetchone()
     return row
 
